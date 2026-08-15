@@ -316,6 +316,43 @@ def diagnose(obj_name: str) -> str:
     report = '\\n'.join(lines)
     print(report)
     return report
+
+
+def search_skills(query: str) -> list:
+    """
+    Search callable skills by keyword in their name or first docstring line.
+
+    Useful for discovering available capabilities mid-session.
+    Returns matching names and prints up to 10 signatures.
+    """
+    query_terms = [term.lower() for term in str(query).split() if term]
+    matches = []
+    for name, obj in list(globals().items()):
+        if name.startswith("_") or not callable(obj) or isinstance(obj, type):
+            continue
+        doc = (getattr(obj, "__doc__", "") or "").lower()
+        text = f"{name.lower()} {doc}"
+        score = sum(1 for term in query_terms if term in text)
+        if not query_terms or not score:
+            continue
+        try:
+            signature = str(_inspect.signature(obj))
+        except (ValueError, TypeError):
+            signature = "()"
+        summary = doc.strip().splitlines()[0][:160] if doc else ""
+        matches.append({"name": name, "signature": f"{name}{signature}",
+                        "summary": summary, "score": score})
+
+    matches.sort(key=lambda item: item["score"], reverse=True)
+    if not matches:
+        print(f"No skills found for '{query}'.")
+        return []
+    print(f"Found {len(matches)} skill(s) for '{query}':")
+    for match in matches[:10]:
+        print(f"  • {match['signature']}")
+        if match["summary"]:
+            print(f"    {match['summary']}")
+    return [match["name"] for match in matches]
 '''
 
 

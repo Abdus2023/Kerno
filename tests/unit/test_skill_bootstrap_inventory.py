@@ -15,6 +15,9 @@ from kerno.skills.builtins import (
     experiment,
     export,
     features,
+    filesystem,
+    synth,
+    api,
     finance,
     graph,
     introspect,
@@ -55,6 +58,8 @@ EXPECTED_MODULES = {
     "artifacts_skills": artifacts.get_code,
     "export_skills": export.get_code,
     "docs_skills": docs.get_code,
+    "filesystem_skills": filesystem.get_code,
+    "synth_skills": synth.get_code,
     "network_skills": network.get_code,
     "graph_skills": graph.get_code,
     "simulation_skills": None,
@@ -62,6 +67,7 @@ EXPECTED_MODULES = {
     "finance_skills": finance.get_code,
     "experiment_skills": experiment.get_code,
     "llm_tools_skills": llm_tools.get_code,
+    "api_skills": api.get_code,
     "web_skills": web.get_code,
     "sql_skills": sql.get_code,
 }
@@ -84,11 +90,12 @@ def test_full_stack_composer_matches_bootstrap_domains():
     expected_domains = {
         "data", "viz", "introspect", "meta", "ml", "stats", "text", "nlp",
         "timeseries", "synthetic", "features", "quality", "anomaly", "report",
-        "artifacts", "export", "docs", "network", "graph", "simulation",
-        "optimization", "finance", "experiment", "llm_tools", "web", "sql",
+        "artifacts", "export", "docs", "filesystem", "synth", "network", "graph",
+        "simulation", "optimization", "finance", "experiment", "llm_tools",
+        "api", "web", "sql",
     }
     assert set(skill_set.names()) == expected_domains
-    assert len(skill_set) == len(_bootstrap_module._SKILL_MODULES) == 26
+    assert len(skill_set) == len(_bootstrap_module._SKILL_MODULES) == 29
 
 
 @pytest.mark.parametrize("preset", [

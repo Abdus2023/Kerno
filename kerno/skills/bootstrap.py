@@ -35,6 +35,9 @@ from kerno.skills.builtins.optimization import get_code as optimization_code
 from kerno.skills.builtins.experiment import get_code as experiment_code
 from kerno.skills.builtins.meta       import get_code as meta_code
 from kerno.skills.builtins.export     import get_code as export_code
+from kerno.skills.builtins.filesystem import get_code as filesystem_code
+from kerno.skills.builtins.synth      import get_code as synth_code
+from kerno.skills.builtins.api        import get_code as api_code
 from kerno.skills.registry            import SkillRegistry
 
 
@@ -56,6 +59,8 @@ _SKILL_MODULES = [
     ("artifacts_skills",  artifacts_code),
     ("export_skills",     export_code),
     ("docs_skills",       docs_code),
+    ("filesystem_skills", filesystem_code),
+    ("synth_skills",      synth_code),
     ("network_skills",    network_code),
     ("graph_skills",      graph_code),
     ("simulation_skills", simulation_code),
@@ -63,6 +68,7 @@ _SKILL_MODULES = [
     ("finance_skills",    finance_code),
     ("experiment_skills", experiment_code),
     ("llm_tools_skills",  llm_tools_code),
+    ("api_skills",        api_code),
     ("web_skills",        web_code),
     ("sql_skills",        sql_code),
 ]

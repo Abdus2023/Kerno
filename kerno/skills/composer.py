@@ -220,6 +220,9 @@ def full_stack_skills() -> SkillSet:
     from kerno.skills.builtins.artifacts  import get_code as artifacts_code
     from kerno.skills.builtins.export     import get_code as export_code
     from kerno.skills.builtins.docs       import get_code as docs_code
+    from kerno.skills.builtins.filesystem import get_code as filesystem_code
+    from kerno.skills.builtins.synth      import get_code as synth_code
+    from kerno.skills.builtins.api        import get_code as api_code
     from kerno.skills.builtins.network    import get_code as network_code
     from kerno.skills.builtins.graph      import get_code as graph_code
     from kerno.skills.builtins.simulation import get_code as simulation_code
@@ -250,6 +253,8 @@ def full_stack_skills() -> SkillSet:
         .add(CodeSkill("artifacts", artifacts_code(), dependencies=["data"]))
         .add(CodeSkill("export", export_code(), dependencies=["data"]))
         .add(CodeSkill("docs", docs_code()))
+        .add(CodeSkill("filesystem", filesystem_code(), dependencies=["data"]))
+        .add(CodeSkill("synth", synth_code(), dependencies=["data"]))
         .add(CodeSkill("network", network_code(), dependencies=["data"]))
         .add(CodeSkill("graph", graph_code(), dependencies=["data"]))
         .add(CodeSkill("simulation", simulation_code()))
@@ -257,6 +262,7 @@ def full_stack_skills() -> SkillSet:
         .add(CodeSkill("finance", finance_code(), dependencies=["timeseries"]))
         .add(CodeSkill("experiment", experiment_code(), dependencies=["stats"]))
         .add(CodeSkill("llm_tools", llm_tools_code()))
+        .add(CodeSkill("api", api_code()))
         .add(CodeSkill("web", web_code()))
         .add(CodeSkill("sql", sql_code()))
     )
