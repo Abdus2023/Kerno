@@ -5,9 +5,11 @@ import json
 from kerno import powerful_pack
 from kerno.plugins.pack.artifacts import ArtifactTrackerPlugin
 from kerno.plugins.pack.budget import BudgetPlugin
+from kerno.plugins.pack.checkpoint import CheckpointPlugin
 from kerno.plugins.pack.guardrails import GuardrailPolicy, SafetyGuardrailPlugin
 from kerno.plugins.pack.progress import ProgressPlugin
 from kerno.plugins.pack.quality import SessionQualityPlugin
+from kerno.plugins.pack.recovery import RecoveryAssistantPlugin
 from kerno.plugins.pack.telemetry import TelemetryPlugin
 from kerno.types import Cell, CellError, CellOutput, SessionResult, SessionStatus
 
@@ -20,13 +22,37 @@ def _cell(code: str = "x = 1", output: str = "", cell_num: int = 1, **output_kwa
     )
 
 
+def _classified_from_error(error: CellError):
+    from kerno.errors.classifier import ErrorClassifier
+    return ErrorClassifier().classify(error)
+
+
 def test_powerful_pack_registers_default_plugins():
     pack = powerful_pack()
-    assert len(pack) == 8
+    assert len(pack) == 9
     names = [p.name for p in pack._plugins]
-    assert "safety_guardrails" in names
-    assert "artifact_tracker" in names
-    assert "telemetry" in names
+    assert "recovery_assistant" in names
+    assert "checkpoint" not in names
+
+
+def test_powerful_pack_with_kernel_and_checkpoints(tmp_path):
+    class DummyKernel:
+        def __init__(self):
+            self.executed = []
+        def execute(self, code, timeout=30, silent=False):
+            self.executed.append(code)
+            class Output:
+                has_error = False
+                stdout = "[checkpoint] saved 0 object(s)"
+            return Output()
+
+    kernel = DummyKernel()
+    pack = powerful_pack(kernel=kernel, checkpoint_directory=str(tmp_path), checkpoint_every=1)
+    pack.on_session_start("task", "sid")
+    pack.on_cell_complete(_cell("x = 1", cell_num=1))
+    pack.on_session_complete(SessionResult("sid", "task", SessionStatus.COMPLETE, []))
+    assert kernel.executed
+    assert "_checkpoint_directory" in kernel.executed[0]
 
 
 def test_progress_plugin_emits_lifecycle_messages(capsys):
@@ -37,7 +63,7 @@ def test_progress_plugin_emits_lifecycle_messages(capsys):
         "session-123", "analyze data", SessionStatus.COMPLETE, []
     ))
     out = capsys.readouterr().out
-    assert "session-12" in out
+    assert "session-123" in out
     assert "cell 1" in out
     assert "session complete" in out
 
@@ -82,8 +108,7 @@ def test_telemetry_writes_jsonl_events(tmp_path):
     plugin.on_session_complete(SessionResult(
         "sid-1", "task", SessionStatus.COMPLETE, []
     ))
-    path = tmp_path / "sid-1.jsonl"
-    records = [json.loads(line) for line in path.read_text().splitlines()]
+    records = [json.loads(line) for line in (tmp_path / "sid-1.jsonl").read_text().splitlines()]
     assert [r["event"] for r in records] == [
         "session_start", "cell_complete", "session_complete"
     ]
@@ -93,19 +118,33 @@ def test_quality_plugin_aggregates_metrics():
     plugin = SessionQualityPlugin()
     plugin.on_session_start("task", "sid")
     plugin.on_cell_complete(_cell("x=1", "1", images=["png"], displays=[{"html": "t"}]))
-
-    class _Classified:
-        error_class = type("_E", (), {"name": "SYNTAX_ERROR"})()
-        recovery_hint = "fix it"
-
     plugin.on_error(
         _cell("bad", CellOutput(error=CellError("SyntaxError", "bad")), cell_num=2),
-        _Classified(),
+        _classified_from_error(CellError("SyntaxError", "bad")),
     )
     plugin.on_cell_complete(_cell("x=2", "2", cell_num=3))
     plugin.on_session_complete(SessionResult("sid", "task", SessionStatus.COMPLETE, []))
-    assert plugin.report.cells == 3
+    assert plugin.report.cells == 2  # on_cell_complete calls
     assert plugin.report.errors == 1
     assert plugin.report.images == 1
     assert plugin.report.displays == 1
     assert plugin.report.error_classes["SYNTAX_ERROR"] == 1
+
+
+def test_recovery_plugin_classifies_and_summarizes(capsys):
+    from kerno.errors.classifier import ErrorClassifier
+
+    plugin = RecoveryAssistantPlugin()
+    error = CellError("KeyError", "'missing'")
+    bad = _cell("df['missing']", cell_num=2, error=error)
+    plugin.on_error(bad, ErrorClassifier().classify(error))
+    plugin.on_session_complete(SessionResult("sid", "task", SessionStatus.COMPLETE, [bad]))
+    out = capsys.readouterr().out
+    assert "WRONG_COLUMN" in out
+    assert plugin.events[0].ename == "KeyError"
+
+
+def test_checkpoint_plugin_requires_kernel():
+    plugin = CheckpointPlugin(every=1)
+    plugin.on_cell_complete(_cell(cell_num=1))
+    assert not plugin.records

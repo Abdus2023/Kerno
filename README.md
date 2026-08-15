@@ -320,8 +320,11 @@ For production-grade sessions, use the powerful plugin pack:
 from kerno import run, powerful_pack
 
 plugins = powerful_pack(
+    kernel=kernel,
     notebook_path="sessions/live.ipynb",
     telemetry_directory="_kerno/telemetry",
+    checkpoint_directory="_checkpoints/session",
+    checkpoint_every=10,
     max_cells=50,
     max_seconds=600,
 )
@@ -335,10 +338,12 @@ The pack combines:
 - `TimingPlugin` — cell and session timing
 - `CostEstimatorPlugin` — rough token/cost estimate
 - `BudgetPlugin` — cell/time/input/output budget tracking
+- `RecoveryAssistantPlugin` — classified errors with concise recovery guidance
 - `SafetyGuardrailPlugin` — static review for unsafe calls/imports/paths
 - `ArtifactTrackerPlugin` — discovers files saved by cells
 - `TelemetryPlugin` — structured JSONL lifecycle events
 - `SessionQualityPlugin` — error, recovery, image, and display summary
+- `CheckpointPlugin` — optional periodic DataFrame/model serialization
 - optional `NotebookPlugin` live notebook writing
 
 ---

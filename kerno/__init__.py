@@ -178,6 +178,9 @@ from kerno.plugins.pack import (
     ArtifactTrackerPlugin,
     BudgetPlugin,
     SessionQualityPlugin,
+    RecoveryAssistantPlugin,
+    CheckpointPlugin,
+    GuardrailPolicy,
 )
 
 # ── Telemetry ────────────────────────────────────────────────────────────────
@@ -362,6 +365,7 @@ __all__ = [
     "powerful_pack", "ProgressPlugin", "TelemetryPlugin",
     "SafetyGuardrailPlugin", "ArtifactTrackerPlugin",
     "BudgetPlugin", "SessionQualityPlugin",
+    "RecoveryAssistantPlugin", "CheckpointPlugin", "GuardrailPolicy",
 
     # Telemetry
     "get_tracer", "get_metrics", "get_logger",

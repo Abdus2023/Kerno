@@ -44,14 +44,8 @@ class SessionQualityPlugin(BasePlugin):
         self.report.displays += len(getattr(output, "displays", []) or [])
 
     def on_error(self, cell, classified_error) -> None:
-        # BaseLoop dispatches on_cell_complete before on_error; avoid double count.
-        output = getattr(cell, "output", None)
-        already_counted = bool(getattr(output, "has_error", False))
-        if not already_counted:
-            self.report.cells += 1
-            self.report.total_duration += float(getattr(output, "duration", 0.0) or 0.0)
-            self.report.images += len(getattr(output, "images", []) or [])
-            self.report.displays += len(getattr(output, "displays", []) or [])
+        # Errors are counted separately from cell completion to avoid assuming
+        # whether the surrounding registry dispatches on_cell_complete first.
         self.report.errors += 1
         label = getattr(getattr(classified_error, "error_class", None), "name", "UNKNOWN")
         self.report.error_classes[label] += 1
