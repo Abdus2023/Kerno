@@ -1,0 +1,97 @@
+kerno/
+│
+├── __init__.py               run(), run_with_pool()
+├── types.py                  All shared types
+├── config.py                 KernoConfig, KernelConfig, LLMConfig, ...
+├── runner.py                 run_with_config()
+│
+├── kernel/
+│   ├── output.py             ZMQ → CellOutput
+│   ├── snapshot.py           Live namespace → JSON
+│   ├── runtime.py            KernelRuntime + telemetry
+│   └── pool.py               KernelPool + health monitor
+│
+├── loop/
+│   ├── base.py               Infrastructure + recovery + memory + telemetry
+│   ├── reactive.py           Observe → Act
+│   ├── reflect.py            Think → Act → Reflect
+│   ├── plan_execute.py       Plan → Verify → Advance
+│   ├── hierarchical.py       Planner + Executor LLMs
+│   └── multi_agent.py        Multiple agents on shared kernel
+│
+├── context/
+│   ├── builder.py            Dynamic system prompt
+│   └── compressor.py         History → summaries
+│
+├── skills/
+│   ├── registry.py           Protected skill loading
+│   ├── bootstrap.py          Loads all builtins
+│   └── builtins/
+│       ├── data.py           load, profile, clean_nulls, checkpoint
+│       ├── viz.py            plot_*, correlation, timeseries
+│       ├── introspect.py     what_exists, schema_of, diagnose
+│       ├── web.py            fetch, fetch_json, extract_tables
+│       └── sql.py            connect, query, list_tables, schema_of_table
+│
+├── errors/
+│   ├── classifier.py         Error taxonomy + recovery templates
+│   └── recovery.py           Loop-level recovery
+│
+├── memory/
+│   ├── store.py              Abstract MemoryStore interface
+│   ├── simple.py             TF-IDF keyword search, JSON persistence
+│   └── chroma.py             ChromaDB semantic vector search
+│
+├── security/
+│   ├── allowlist.py          Module + pattern allowlisting
+│   └── sanitizer.py          Prompt injection detection
+│
+├── comms/
+│   └── channel.py            KernoComm: structured ZMQ messages
+│
+├── telemetry/
+│   ├── __init__.py
+│   ├── tracer.py             Span-based tracing → JSONL
+│   ├── metrics.py            Counters, histograms, gauges → JSONL
+│   └── logger.py             Structured JSON logging
+│
+├── audit/
+│   └── notebook.py           SessionResult → .ipynb artifact
+│
+├── notebook/
+│   └── continuation.py       Load prior notebook, resume from state
+│
+└── cli/
+    ├── __init__.py
+    └── main.py               kerno run / session / memory / config / doctor
+
+tests/
+├── unit/
+│   ├── test_types.py
+│   ├── test_error_classifier.py
+│   ├── test_notebook_audit.py
+│   ├── test_snapshot.py
+│   ├── test_context_builder.py
+│   ├── test_memory.py
+│   ├── test_security.py
+│   ├── test_telemetry.py
+│   └── test_multi_agent.py
+│
+└── behavioral/
+    ├── test_runtime.py
+    ├── test_loops.py
+    ├── test_plan_execute.py
+    ├── test_error_recovery_integration.py
+    └── test_memory_integration.py
+
+examples/
+    01_basic.py               Simplest case
+    02_reflect_with_notebook.py
+    03_plan_execute.py
+    04_hierarchical.py
+    05_parallel.py
+    06_with_config.py         Config-driven
+    07_with_memory.py         Cross-session memory
+    08_multi_agent_review.py  Analyst + critic + narrator
+    09_resume_notebook.py     Notebook continuation
+    10_with_comms.py          Structured progress reporting

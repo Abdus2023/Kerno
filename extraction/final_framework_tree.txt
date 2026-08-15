@@ -1,0 +1,58 @@
+kerno/
+│
+├── __init__.py               run(), run_with_pool() — complete public API
+├── types.py                  All shared types
+│
+├── kernel/
+│   ├── output.py             ZMQ → CellOutput
+│   ├── snapshot.py           Live namespace → JSON
+│   ├── runtime.py            Single kernel + telemetry
+│   └── pool.py               Warm pool + health monitor
+│
+├── loop/
+│   ├── base.py               Infrastructure + error recovery + memory + telemetry
+│   ├── reactive.py           Observe → Act
+│   ├── reflect.py            Think → Act → Reflect
+│   ├── plan_execute.py       Plan → Verify → Advance
+│   ├── hierarchical.py       Planner LLM + Executor LLM
+│   └── multi_agent.py        Analyst + Critic + Narrator on shared kernel
+│
+├── context/
+│   ├── builder.py            Dynamic system prompt
+│   └── compressor.py         History → summaries
+│
+├── skills/
+│   ├── registry.py           Protected skill loading
+│   ├── bootstrap.py          Loads all builtins
+│   └── builtins/
+│       ├── data.py           load, profile, clean_nulls, checkpoint
+│       ├── viz.py            plot_distributions, plot_correlation,
+│       │                     plot_timeseries, plot_comparison, plot_scatter
+│       ├── introspect.py     what_exists, schema_of, dependencies_of,
+│       │                     memory_report, diagnose
+│       ├── web.py            fetch, fetch_json, extract_tables, read_csv_url
+│       └── sql.py            connect, query, list_tables, schema_of_table,
+│                             execute_sql, table_stats
+│
+├── errors/
+│   ├── classifier.py         Error taxonomy + recovery code templates
+│   └── recovery.py           Loop-level recovery integration
+│
+├── memory/
+│   ├── store.py              Abstract MemoryStore interface
+│   └── simple.py             TF-IDF keyword search, JSON persistence
+│
+├── security/
+│   ├── allowlist.py          Module + pattern allowlisting
+│   └── sanitizer.py          Prompt injection detection + neutralization
+│
+├── comms/
+│   └── channel.py            Structured kernel → orchestrator ZMQ messages
+│
+├── telemetry/
+│   ├── tracer.py             Span-based tracing, JSONL output
+│   ├── metrics.py            Counters, histograms, gauges, JSONL output
+│   └── logger.py             Structured JSON logging
+│
+└── audit/
+    └── notebook.py           SessionResult → .ipynb artifact

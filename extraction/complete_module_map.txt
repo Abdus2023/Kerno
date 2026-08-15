@@ -1,0 +1,33 @@
+kerno/
+├── __init__.py              ✓  Full public API surface
+│
+├── types.py                 ✓  All shared types
+│
+├── kernel/
+│   ├── output.py            ✓  ZMQ → CellOutput
+│   ├── snapshot.py          ✓  Live namespace → JSON
+│   ├── runtime.py           ✓  Single kernel lifecycle
+│   └── pool.py              ✓  Warm pool, lifecycle limits
+│
+├── loop/
+│   ├── base.py              ✓  Execution infrastructure
+│   ├── reactive.py          ✓  Observe → Act
+│   ├── reflect.py           ✓  Think → Act → Reflect
+│   └── plan_execute.py      ✓  Plan → Verify → Advance
+│
+├── context/
+│   ├── builder.py           ✓  Dynamic system prompt
+│   └── compressor.py        ✓  History → summaries
+│
+├── skills/
+│   ├── registry.py          ✓  Protected skill loading
+│   ├── bootstrap.py         ✓  Default skill set entry point
+│   └── builtins/
+│       └── data.py          ✓  load, profile, clean_nulls, checkpoint
+│
+├── errors/
+│   ├── classifier.py        ✓  Error taxonomy + recovery code
+│   └── recovery.py          ✓  Loop-level recovery integration
+│
+└── audit/
+    └── notebook.py          ✓  SessionResult → .ipynb artifact

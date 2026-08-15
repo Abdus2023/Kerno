@@ -1,0 +1,55 @@
+kerno/                          ← The framework ("kernel" + "no framework")
+│
+├── kerno/
+│   ├── **init**.py             ← Public API surface
+│   │
+│   ├── kernel/
+│   │   ├── **init**.py
+│   │   ├── [runtime.py](http://runtime.py)          ← KernelRuntime: start, execute, shutdown
+│   │   ├── [pool.py](http://pool.py)             ← KernelPool: warm kernels, lifecycle
+│   │   ├── [output.py](http://output.py)           ← OutputCollector: ZMQ → structured dict
+│   │   └── [snapshot.py](http://snapshot.py)         ← NamespaceSnapshot: live state → tokens
+│   │
+│   ├── loop/
+│   │   ├── **init**.py
+│   │   ├── [base.py](http://base.py)             ← BaseLoop: the primitive
+│   │   ├── [reactive.py](http://reactive.py)         ← ReactiveLoop
+│   │   ├── plan_[execute.py](http://execute.py)     ← PlanExecuteLoop
+│   │   └── [reflect.py](http://reflect.py)          ← ReflectReviseLoop
+│   │
+│   ├── context/
+│   │   ├── **init**.py
+│   │   ├── [manager.py](http://manager.py)          ← ContextManager: window vs namespace
+│   │   ├── [compressor.py](http://compressor.py)       ← HistoryCompressor: cells → summaries
+│   │   └── [builder.py](http://builder.py)          ← PromptBuilder: dynamic system prompts
+│   │
+│   ├── skills/
+│   │   ├── **init**.py
+│   │   ├── [registry.py](http://registry.py)         ← SkillRegistry: load, protect, introspect
+│   │   ├── [bootstrap.py](http://bootstrap.py)        ← Default skill set
+│   │   └── builtins/
+│   │       ├── [data.py](http://data.py)
+│   │       ├── [display.py](http://display.py)
+│   │       └── [introspect.py](http://introspect.py)
+│   │
+│   ├── errors/
+│   │   ├── **init**.py
+│   │   ├── [classifier.py](http://classifier.py)       ← ErrorClassifier: taxonomy + recovery
+│   │   └── [recovery.py](http://recovery.py)         ← RecoveryStrategies
+│   │
+│   ├── audit/
+│   │   ├── **init**.py
+│   │   └── [notebook.py](http://notebook.py)         ← NotebookAuditTrail
+│   │
+│   └── [types.py](http://types.py)                ← Shared types: Cell, Output, Session, etc.
+│
+├── tests/
+│   ├── unit/
+│   ├── behavioral/
+│   └── fixtures/
+│
+├── examples/
+│   └── basic_[analysis.py](http://analysis.py)
+│
+├── pyproject.toml
+└── [README.md](http://README.md)
