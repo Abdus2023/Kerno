@@ -29,6 +29,17 @@ class BasePlugin(ABC):
         """Called after each cell execution (success or error)."""
         pass
 
+    def on_before_cell(self, code: str):
+        """
+        Called immediately before generated code is executed.
+
+        Return a string to replace the code, or None/False to leave it
+        unchanged. Raise an exception to block execution; BaseLoop converts
+        it into a synthetic error cell so the agent can observe and recover
+        from the block.
+        """
+        return None
+
     def on_error(self, cell, classified_error) -> None:
         """Called when a cell produces an error."""
         pass
@@ -75,6 +86,19 @@ class PluginRegistry:
 
     def on_cell_complete(self, cell) -> None:
         self._dispatch("on_cell_complete", cell)
+
+    def on_before_cell(self, code: str):
+        """
+        Run pre-execution plugins, allowing them to rewrite or block code.
+
+        Plugin exceptions are propagated so pre-execution guards can prevent a
+        cell from running. Other registry dispatch methods remain best-effort.
+        """
+        for plugin in self._plugins:
+            new_code = plugin.on_before_cell(code)
+            if isinstance(new_code, str) and new_code:
+                code = new_code
+        return code
 
     def on_error(self, cell, classified_error) -> None:
         self._dispatch("on_error", cell, classified_error)

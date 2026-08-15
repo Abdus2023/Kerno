@@ -29,8 +29,9 @@ def _classified_from_error(error: CellError):
 
 def test_powerful_pack_registers_default_plugins():
     pack = powerful_pack()
-    assert len(pack) == 9
+    assert len(pack) == 10
     names = [p.name for p in pack._plugins]
+    assert "secret_redaction" in names
     assert "recovery_assistant" in names
     assert "checkpoint" not in names
 

@@ -18,18 +18,22 @@ from .guardrails import GuardrailPolicy, SafetyGuardrailPlugin
 from .progress import ProgressPlugin
 from .quality import SessionQualityPlugin
 from .recovery import RecoveryAssistantPlugin
+from .safety import BlockedExecution, HardGuardrailPlugin, SecretRedactionPlugin
 from .telemetry import TelemetryPlugin
 from .builder import powerful_pack
 
 __all__ = [
     "powerful_pack",
     "ArtifactTrackerPlugin",
+    "BlockedExecution",
     "BudgetPlugin",
     "CheckpointPlugin",
     "GuardrailPolicy",
+    "HardGuardrailPlugin",
     "ProgressPlugin",
     "RecoveryAssistantPlugin",
     "SafetyGuardrailPlugin",
+    "SecretRedactionPlugin",
     "SessionQualityPlugin",
     "TelemetryPlugin",
 ]

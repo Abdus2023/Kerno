@@ -18,6 +18,7 @@ from .guardrails import GuardrailPolicy, SafetyGuardrailPlugin
 from .progress import ProgressPlugin
 from .quality import SessionQualityPlugin
 from .recovery import RecoveryAssistantPlugin
+from .safety import HardGuardrailPlugin, SecretRedactionPlugin
 from .telemetry import TelemetryPlugin
 
 
@@ -35,24 +36,18 @@ def powerful_pack(
     cost_model: str = "claude-opus-4-5",
     max_cells: int = 50,
     max_seconds: float = 600.0,
+    hard_guardrails: bool = False,
+    redact_secrets: bool = True,
     guardrail_policy: GuardrailPolicy | None = None,
     extra_plugins: list[BasePlugin] | None = None,
 ) -> PluginRegistry:
     """
     Create a batteries-included plugin registry for production sessions.
 
-    Included by default:
-      - progress: readable per-cell/session updates
-      - timing: average/slowest cell and total runtime
-      - cost: rough token/cost estimate
-      - budget: cell/time/input/output guardrails
-      - recovery: classified error guidance
-      - safety_guardrails: static review for dangerous patterns
-      - artifact_tracker: discovers files created by cells
-      - telemetry: structured JSONL lifecycle events
-      - session_quality: error/recovery/display summary
-      - checkpoint: optional periodic DataFrame/model serialization
-      - notebook_writer: optional live notebook persistence
+    By default this includes secret redaction, progress/timing/cost reporting,
+    static safety warnings, artifact tracking, telemetry, recovery guidance,
+    and quality summaries. Set ``hard_guardrails=True`` to block shell, eval,
+    and destructive filesystem calls before they reach the kernel.
     """
     registry = PluginRegistry()
     checkpoint = None
@@ -63,6 +58,11 @@ def powerful_pack(
         )
         if kernel is not None:
             checkpoint.attach(kernel)
+
+    if redact_secrets:
+        registry.register(SecretRedactionPlugin())
+    if hard_guardrails:
+        registry.register(HardGuardrailPlugin())
 
     plugins: list[BasePlugin] = [
         ProgressPlugin(),
