@@ -16,12 +16,10 @@ try:
 except ImportError:
     HAS_HYPOTHESIS = False
 
-pytestmark = pytest.mark.skipif(
-    not HAS_HYPOTHESIS,
-    reason="hypothesis not installed"
-)
-
 from kerno.pipeline   import Pipeline, LoopStep, IdentityStep
+
+if not HAS_HYPOTHESIS:
+    pytest.skip("hypothesis not installed", allow_module_level=True)
 from kerno.interfaces import AgentState
 
 

@@ -93,7 +93,9 @@ class KernelRuntime:
         with self._tracer.span("kernel.execute", attrs) as span:
             start   = time.monotonic()
             msg_id  = self._kc.execute(code, silent=silent)
-            output  = collect(self._kc, msg_id, timeout=timeout)
+            output  = collect(
+                self._kc, msg_id, timeout=timeout, on_timeout=self.interrupt
+            )
             dur_ms  = (time.monotonic() - start) * 1000
             output.duration = dur_ms / 1000
 
@@ -134,7 +136,9 @@ class KernelRuntime:
         self._assert_running()
         msg_id = self._kc.execute(code)
         self._cell_count += 1
-        yield from stream(self._kc, msg_id, timeout=timeout)
+        yield from stream(
+            self._kc, msg_id, timeout=timeout, on_timeout=self.interrupt
+        )
 
     @property
     def namespace(self) -> str:

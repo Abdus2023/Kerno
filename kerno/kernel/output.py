@@ -19,15 +19,23 @@ def _strip_ansi(text: str) -> str:
     return _ANSI_ESCAPE.sub("", text)
 
 
-def collect(kc, msg_id: str, timeout: float = 120.0) -> CellOutput:
+def collect(
+    kc,
+    msg_id: str,
+    timeout: float = 120.0,
+    on_timeout: "callable | None" = None,
+) -> CellOutput:
     """
     Collect all ZMQ messages for a given execution request.
     Blocks until kernel signals idle or timeout expires.
 
     Args:
-        kc:      KernelClient (already connected)
-        msg_id:  The message ID returned by kc.execute()
-        timeout: Wall-clock timeout in seconds
+        kc:         KernelClient (already connected)
+        msg_id:     The message ID returned by kc.execute()
+        timeout:    Wall-clock timeout in seconds
+        on_timeout: Optional zero-argument callback invoked when the deadline
+                    expires. Typically used to interrupt the kernel via its
+                    KernelManager (KernelClient has no interrupt method).
 
     Returns:
         Fully populated CellOutput
@@ -38,7 +46,12 @@ def collect(kc, msg_id: str, timeout: float = 120.0) -> CellOutput:
     while True:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            kc.interrupt_kernel()
+            if on_timeout is not None:
+                try:
+                    on_timeout()
+                except Exception as exc:           # pragma: no cover
+                    import sys
+                    print(f"Timeout interrupt failed: {exc}", file=sys.stderr)
             output.error = CellError(
                 ename="TimeoutError",
                 evalue=f"Cell execution exceeded {timeout}s limit"
@@ -99,7 +112,12 @@ def collect(kc, msg_id: str, timeout: float = 120.0) -> CellOutput:
     return output
 
 
-def stream(kc, msg_id: str, timeout: float = 120.0) -> Iterator[tuple[str, str]]:
+def stream(
+    kc,
+    msg_id: str,
+    timeout: float = 120.0,
+    on_timeout: "callable | None" = None,
+) -> Iterator[tuple[str, str]]:
     """
     Generator variant: yields (msg_type, text) as messages arrive.
     Useful for long-running cells where you want to read output in real time.
@@ -112,7 +130,8 @@ def stream(kc, msg_id: str, timeout: float = 120.0) -> Iterator[tuple[str, str]]
     while True:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            kc.interrupt_kernel()
+            if on_timeout is not None:
+                on_timeout()
             yield ("error", "TimeoutError: execution limit exceeded")
             return
 

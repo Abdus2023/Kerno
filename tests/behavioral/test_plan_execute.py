@@ -21,23 +21,27 @@ def make_mock_llm(plan_json: str, execution_responses: list[str]):
 
     def llm(messages: list[Message]) -> str:
         call_log.append(messages)
-        n = len(call_log)
-
-        # First call: planning
-        if n == 1:
-            return plan_json
-
-        # Verification calls: return success JSON
         last_user = next(
             (m.content for m in reversed(messages) if m.role == "user"), ""
         )
-        if '"success":' in last_user or "Did the step succeed" in last_user:
+
+        # First call: planning
+        if len(call_log) == 1:
+            return plan_json
+
+        # Verification calls: return success JSON
+        if "Did the step succeed" in last_user or "You just executed step" in last_user:
             return '{"success": true, "reason": "ok", "unexpected": null}'
 
-        # Execution calls
-        exec_idx = len([m for m in call_log if any("Step" in (msg.content or "") for msg in m)])
-        if exec_idx < len(execution_responses):
-            return execution_responses[exec_idx]
+        # Execution calls occur once per non-planning/non-verification LLM call.
+        execution_calls = [
+            log for log in call_log[1:]
+            if not any("Did the step succeed" in (m.content or "") for m in log)
+            and not any("You just executed step" in (m.content or "") for m in log)
+        ]
+        idx = len(execution_calls) - 1
+        if 0 <= idx < len(execution_responses):
+            return execution_responses[idx]
 
         return "# TASK_COMPLETE: all steps done"
 
@@ -103,7 +107,10 @@ class TestPlanExecuteLoop:
         assert len(loop._plan) > 0
 
     def test_verbose_does_not_raise(self, kernel):
-        llm  = make_mock_llm(SIMPLE_PLAN, ["x = 1", "y = 2"])
+        llm  = make_mock_llm(
+            SIMPLE_PLAN,
+            ["x = 10\nprint(x)", "y = x * 2\nprint(y)"],
+        )
         loop = PlanExecuteLoop(kernel=kernel, llm=llm, max_cells=10, verbose=True)
 
         # Should not raise even with verbose=True
