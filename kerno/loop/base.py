@@ -127,6 +127,36 @@ class BaseLoop(ABC):
                     status = SessionStatus.KERNEL_DIED
                     break
 
+                if self.plugins:
+                    try:
+                        transformed = self.plugins.on_before_cell(code)
+                        if isinstance(transformed, str) and transformed:
+                            code = transformed
+                    except Exception as exc:
+                        # Pre-execution plugins (e.g. hard guardrails) may block
+                        # a cell. Convert this into a synthetic error so the loop
+                        # can surface it and recover rather than terminating.
+                        from kerno.types import CellError, CellOutput
+                        output = CellOutput(
+                            error=CellError(
+                                ename=type(exc).__name__,
+                                evalue=str(exc),
+                            )
+                        )
+                        cell = Cell(code=code, output=output, cell_num=cell_num, author="system")
+                        self._history.append(cell)
+                        if self.verbose:
+                            self._print_output(output)
+                        if self.plugins:
+                            self.plugins.on_cell_complete(cell)
+                            self.plugins.on_error(
+                                cell,
+                                self._recovery._classifier.classify(output.error),
+                            )
+                        self._consecutive_errors += 1
+                        self._on_error(cell)
+                        continue
+
                 output = self.kernel.execute(code, timeout=self.cell_timeout)
 
                 if self.verbose:

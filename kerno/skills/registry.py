@@ -135,10 +135,18 @@ class SkillRegistry:
         code:    str,
         name:    str,
         protect: bool = True,
-    ) -> None:
+    ) -> list[str]:
         """
-        Load a single skill from a code string.
-        Useful for dynamically generated skills.
+        Load a skill module from a code string.
+
+        ``name`` is used as the registry key and source label, but every
+        public top-level function/class discovered in ``code`` is also
+        individually recorded and (optionally) protected. This makes both
+        ``manifest()`` and namespace protection useful for code-string skills,
+        matching the behavior of ``load_file()``.
+
+        Returns:
+            Public names discovered in the code string.
         """
         output = kernel.execute(code, silent=True, timeout=30)
         if output.has_error:
@@ -148,16 +156,32 @@ class SkillRegistry:
             )
 
         code_hash = hashlib.sha256(code.encode()).hexdigest()[:12]
+        discovered = self._discover_names(kernel, code)
+
+        # Preserve the module-level key for bootstrap/composer callers that
+        # reason in terms of modules, but record every callable as well.
         self._records[name] = SkillRecord(
             name        = name,
             source_file = "<dynamic>",
             signature   = "",
-            docstring   = "",
+            docstring   = f"Skill module with {len(discovered)} public callable(s)",
             code_hash   = code_hash,
         )
 
+        for public_name in discovered:
+            detail = kernel.inspect(public_name)
+            self._records[public_name] = SkillRecord(
+                name        = public_name,
+                source_file = f"<dynamic>:{name}",
+                signature   = detail.get("signature", ""),
+                docstring   = detail.get("doc", "")[:200],
+                code_hash   = code_hash,
+            )
+
+        protected = [name] + discovered
         if protect:
-            self._install_protection(kernel, [name])
+            self._install_protection(kernel, protected)
+        return discovered
 
     # ── Integrity ─────────────────────────────────────────────────────────────
 

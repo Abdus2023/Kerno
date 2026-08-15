@@ -9,9 +9,9 @@ import pytest
 from kerno.kernel.runtime import KernelRuntime
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def kernel():
-    """One kernel for all tests in this module — faster than one per test."""
+    """A fresh kernel for each test prevents state/IPython magic from leaking."""
     with KernelRuntime() as k:
         yield k
 
@@ -79,8 +79,7 @@ class TestKernelRuntime:
 
     def test_image_output_captured(self, kernel):
         setup = (
-            "import matplotlib\n"
-            "matplotlib.use('Agg')\n"
+            "%matplotlib inline\n"
             "import matplotlib.pyplot as plt\n"
             "plt.plot([1,2,3])\n"
             "plt.show()"

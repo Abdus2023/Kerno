@@ -122,12 +122,14 @@ from kerno.llm.openrouter import (
 
 from kerno.skills.composer import (
     CodeSkill, FileSkill, ComposedSkill, SkillSet,
-    minimal_skills, analysis_skills, ml_skills,
+    minimal_skills, analysis_skills, ml_skills, full_stack_skills,
+    nlp_skills, timeseries_stack,
 )
 from kerno.skills.registry     import SkillRegistry
 from kerno.skills.bootstrap    import (
     bootstrap as load_default_skills,
-    bootstrap_minimal, bootstrap_ml,
+    bootstrap_minimal, bootstrap_ml, bootstrap_nlp,
+    bootstrap_timeseries, bootstrap_research, bootstrap_quant,
 )
 
 # ── Kernel ───────────────────────────────────────────────────────────────────
@@ -167,6 +169,21 @@ from kerno.notebook.continuation import continue_from_notebook
 from kerno.plugins             import BasePlugin, PluginRegistry
 from kerno.plugins.registry    import (
     CostEstimatorPlugin, NotebookPlugin, TimingPlugin,
+)
+from kerno.plugins.pack import (
+    powerful_pack,
+    ProgressPlugin,
+    TelemetryPlugin,
+    SafetyGuardrailPlugin,
+    HardGuardrailPlugin,
+    SecretRedactionPlugin,
+    BlockedExecution,
+    ArtifactTrackerPlugin,
+    BudgetPlugin,
+    SessionQualityPlugin,
+    RecoveryAssistantPlugin,
+    CheckpointPlugin,
+    GuardrailPolicy,
 )
 
 # ── Telemetry ────────────────────────────────────────────────────────────────
@@ -322,8 +339,10 @@ __all__ = [
     # Skill composition
     "CodeSkill", "FileSkill", "ComposedSkill", "SkillSet",
     "minimal_skills", "analysis_skills", "ml_skills",
+    "full_stack_skills", "nlp_skills", "timeseries_stack",
     "SkillRegistry", "load_default_skills",
-    "bootstrap_minimal", "bootstrap_ml",
+    "bootstrap_minimal", "bootstrap_ml", "bootstrap_nlp",
+    "bootstrap_timeseries", "bootstrap_research", "bootstrap_quant",
 
     # Kernel
     "KernelRuntime", "KernelPool",
@@ -346,6 +365,11 @@ __all__ = [
     # Plugins
     "PluginRegistry", "BasePlugin",
     "TimingPlugin", "CostEstimatorPlugin", "NotebookPlugin",
+    "powerful_pack", "ProgressPlugin", "TelemetryPlugin",
+    "SafetyGuardrailPlugin", "HardGuardrailPlugin",
+    "SecretRedactionPlugin", "BlockedExecution", "ArtifactTrackerPlugin",
+    "BudgetPlugin", "SessionQualityPlugin",
+    "RecoveryAssistantPlugin", "CheckpointPlugin", "GuardrailPolicy",
 
     # Telemetry
     "get_tracer", "get_metrics", "get_logger",

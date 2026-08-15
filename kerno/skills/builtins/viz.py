@@ -308,7 +308,7 @@ def plot_comparison(
     _display(fig)
     plt.close(fig)
 
-    print(f"\n{group_col} summary (top {top_n} by mean {value_col}):")
+    print(f"\\n{group_col} summary (top {top_n} by mean {value_col}):")
     print(summary.round(3).to_string())
 
     return summary

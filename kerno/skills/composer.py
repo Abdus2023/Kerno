@@ -68,33 +68,14 @@ class SkillSet:
     """
     An ordered, deduplicated collection of skills.
     Handles dependency resolution automatically.
-
-    Usage:
-        skills = (
-            SkillSet()
-            .add(data_skill)
-            .add(viz_skill)
-            .add(ml_skill, requires=["data_skill"])
-            .add(custom_skill)
-        )
-        skills.load_into(kernel)
     """
 
     def __init__(self):
-        self._skills:   dict[str, Skill] = {}   # name → Skill
-        self._order:    list[str]        = []    # insertion order
+        self._skills: dict[str, Skill] = {}
+        self._order:  list[str]        = []
 
-    def add(
-        self,
-        skill:    Skill,
-        requires: list[str] = None,
-    ) -> "SkillSet":
-        """
-        Add a skill. Returns self for chaining.
-
-        If requires is given, those skills must already be in this set
-        (or will be checked before loading).
-        """
+    def add(self, skill: Skill, requires: list[str] = None) -> "SkillSet":
+        """Add a skill. Returns self for chaining."""
         name = skill.name
         if name not in self._skills:
             self._skills[name] = skill
@@ -107,13 +88,11 @@ class SkillSet:
         return self
 
     def remove(self, name: str) -> "SkillSet":
-        """Remove a skill by name."""
         self._skills.pop(name, None)
         self._order = [n for n in self._order if n != name]
         return self
 
     def replace(self, name: str, new_skill: Skill) -> "SkillSet":
-        """Replace a skill while preserving load order."""
         if name in self._skills:
             self._skills[name] = new_skill
         return self
@@ -128,11 +107,7 @@ class SkillSet:
             reg.load_code(kernel, skill.code, skill.name, protect=True)
 
     def _load_order(self) -> list[str]:
-        """
-        Topological sort respecting skill dependencies.
-        Falls back to insertion order if no cycles detected.
-        """
-        visited: set[str]  = set()
+        visited: set[str] = set()
         result:  list[str] = []
 
         def visit(name: str) -> None:
@@ -148,11 +123,9 @@ class SkillSet:
 
         for name in self._order:
             visit(name)
-
         return result
 
     def combined_code(self) -> str:
-        """Return all skill code concatenated in load order."""
         parts = []
         for name in self._load_order():
             skill = self._skills.get(name)
@@ -167,7 +140,6 @@ class SkillSet:
         return len(self._skills)
 
     def __or__(self, other: "SkillSet") -> "SkillSet":
-        """Merge two skill sets. other's skills override on conflict."""
         merged = SkillSet()
         for name in self._order:
             merged.add(self._skills[name])
@@ -179,7 +151,6 @@ class SkillSet:
         return merged
 
     def __sub__(self, names: list[str]) -> "SkillSet":
-        """Remove skills by name."""
         result = SkillSet()
         for name in self._order:
             if name not in names:
@@ -191,33 +162,29 @@ class SkillSet:
 
 def minimal_skills() -> SkillSet:
     """Smallest useful skill set: data + introspection."""
-    from kerno.skills.builtins.data      import get_code as data_code
+    from kerno.skills.builtins.data       import get_code as data_code
     from kerno.skills.builtins.introspect import get_code as introspect_code
 
     return (
         SkillSet()
-        .add(CodeSkill("data",      data_code()))
-        .add(CodeSkill("introspect", introspect_code(),
-                       dependencies=["data"]))
+        .add(CodeSkill("data", data_code()))
+        .add(CodeSkill("introspect", introspect_code(), dependencies=["data"]))
     )
 
 
 def analysis_skills() -> SkillSet:
     """Standard data analysis stack."""
-    from kerno.skills.builtins.data      import get_code as data_code
-    from kerno.skills.builtins.viz       import get_code as viz_code
+    from kerno.skills.builtins.data       import get_code as data_code
+    from kerno.skills.builtins.viz        import get_code as viz_code
     from kerno.skills.builtins.introspect import get_code as introspect_code
-    from kerno.skills.builtins.stats     import get_code as stats_code
+    from kerno.skills.builtins.stats      import get_code as stats_code
 
     return (
         SkillSet()
-        .add(CodeSkill("data",      data_code()))
-        .add(CodeSkill("viz",       viz_code(),
-                       dependencies=["data"]))
-        .add(CodeSkill("introspect", introspect_code(),
-                       dependencies=["data"]))
-        .add(CodeSkill("stats",     stats_code(),
-                       dependencies=["data"]))
+        .add(CodeSkill("data", data_code()))
+        .add(CodeSkill("viz", viz_code(), dependencies=["data"]))
+        .add(CodeSkill("introspect", introspect_code(), dependencies=["data"]))
+        .add(CodeSkill("stats", stats_code(), dependencies=["data"]))
     )
 
 
@@ -227,4 +194,101 @@ def ml_skills() -> SkillSet:
     return (
         analysis_skills()
         .add(CodeSkill("ml", ml_code(), dependencies=["data", "viz"]))
+    )
+
+
+def full_stack_skills() -> SkillSet:
+    """
+    The complete built-in skill stack.
+
+    This mirrors kerno.skills.bootstrap.bootstrap and includes every
+    first-party module available with the package.
+    """
+    from kerno.skills.builtins.data       import get_code as data_code
+    from kerno.skills.builtins.viz        import get_code as viz_code
+    from kerno.skills.builtins.introspect import get_code as introspect_code
+    from kerno.skills.builtins.ml         import get_code as ml_code
+    from kerno.skills.builtins.stats      import get_code as stats_code
+    from kerno.skills.builtins.text       import get_code as text_code
+    from kerno.skills.builtins.nlp        import get_code as nlp_code
+    from kerno.skills.builtins.timeseries import get_code as timeseries_code
+    from kerno.skills.builtins.synthetic  import get_code as synthetic_code
+    from kerno.skills.builtins.features   import get_code as features_code
+    from kerno.skills.builtins.quality    import get_code as quality_code
+    from kerno.skills.builtins.anomaly    import get_code as anomaly_code
+    from kerno.skills.builtins.report     import get_code as report_code
+    from kerno.skills.builtins.artifacts  import get_code as artifacts_code
+    from kerno.skills.builtins.export     import get_code as export_code
+    from kerno.skills.builtins.docs       import get_code as docs_code
+    from kerno.skills.builtins.filesystem import get_code as filesystem_code
+    from kerno.skills.builtins.synth      import get_code as synth_code
+    from kerno.skills.builtins.api        import get_code as api_code
+    from kerno.skills.builtins.network    import get_code as network_code
+    from kerno.skills.builtins.graph      import get_code as graph_code
+    from kerno.skills.builtins.simulation import get_code as simulation_code
+    from kerno.skills.builtins.optimization import get_code as optimization_code
+    from kerno.skills.builtins.finance    import get_code as finance_code
+    from kerno.skills.builtins.experiment import get_code as experiment_code
+    from kerno.skills.builtins.meta       import get_code as meta_code
+    from kerno.skills.builtins.llm_tools  import get_code as llm_tools_code
+    from kerno.skills.builtins.web        import get_code as web_code
+    from kerno.skills.builtins.sql        import get_code as sql_code
+
+    return (
+        SkillSet()
+        .add(CodeSkill("data", data_code()))
+        .add(CodeSkill("viz", viz_code(), dependencies=["data"]))
+        .add(CodeSkill("introspect", introspect_code(), dependencies=["data"]))
+        .add(CodeSkill("meta", meta_code(), dependencies=["introspect"]))
+        .add(CodeSkill("ml", ml_code(), dependencies=["data", "viz"]))
+        .add(CodeSkill("stats", stats_code(), dependencies=["data"]))
+        .add(CodeSkill("text", text_code(), dependencies=["data"]))
+        .add(CodeSkill("nlp", nlp_code(), dependencies=["text"]))
+        .add(CodeSkill("timeseries", timeseries_code(), dependencies=["data", "viz"]))
+        .add(CodeSkill("synthetic", synthetic_code(), dependencies=["data"]))
+        .add(CodeSkill("features", features_code(), dependencies=["data", "ml"]))
+        .add(CodeSkill("quality", quality_code(), dependencies=["data"]))
+        .add(CodeSkill("anomaly", anomaly_code(), dependencies=["data", "ml"]))
+        .add(CodeSkill("report", report_code(), dependencies=["data"]))
+        .add(CodeSkill("artifacts", artifacts_code(), dependencies=["data"]))
+        .add(CodeSkill("export", export_code(), dependencies=["data"]))
+        .add(CodeSkill("docs", docs_code()))
+        .add(CodeSkill("filesystem", filesystem_code(), dependencies=["data"]))
+        .add(CodeSkill("synth", synth_code(), dependencies=["data"]))
+        .add(CodeSkill("network", network_code(), dependencies=["data"]))
+        .add(CodeSkill("graph", graph_code(), dependencies=["data"]))
+        .add(CodeSkill("simulation", simulation_code()))
+        .add(CodeSkill("optimization", optimization_code()))
+        .add(CodeSkill("finance", finance_code(), dependencies=["timeseries"]))
+        .add(CodeSkill("experiment", experiment_code(), dependencies=["stats"]))
+        .add(CodeSkill("llm_tools", llm_tools_code()))
+        .add(CodeSkill("api", api_code()))
+        .add(CodeSkill("web", web_code()))
+        .add(CodeSkill("sql", sql_code()))
+    )
+
+
+def nlp_skills() -> SkillSet:
+    """Text-oriented stack: data, viz, text, NLP, quality, and reporting."""
+    from kerno.skills.builtins.text    import get_code as text_code
+    from kerno.skills.builtins.nlp     import get_code as nlp_code
+    from kerno.skills.builtins.quality import get_code as quality_code
+    from kerno.skills.builtins.report  import get_code as report_code
+    return (
+        analysis_skills()
+        .add(CodeSkill("text", text_code(), dependencies=["data"]))
+        .add(CodeSkill("nlp", nlp_code(), dependencies=["text"]))
+        .add(CodeSkill("quality", quality_code(), dependencies=["data"]))
+        .add(CodeSkill("report", report_code(), dependencies=["data"]))
+    )
+
+
+def timeseries_stack() -> SkillSet:
+    """Time-series stack with forecasting, stats, and reporting."""
+    from kerno.skills.builtins.timeseries import get_code as timeseries_code
+    from kerno.skills.builtins.report     import get_code as report_code
+    return (
+        analysis_skills()
+        .add(CodeSkill("timeseries", timeseries_code(), dependencies=["data", "viz"]))
+        .add(CodeSkill("report", report_code(), dependencies=["data"]))
     )

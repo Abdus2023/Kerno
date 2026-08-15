@@ -33,7 +33,11 @@ _checkpoints/
 
 # Kerno runtime artifacts (traces, metrics, logs)
 .kerno/
+_kerno/
 
 # OS
 .DS_Store
 Thumbs.db
+
+# Test/generated artifacts
+_artifacts/
