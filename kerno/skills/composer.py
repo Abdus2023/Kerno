@@ -228,3 +228,67 @@ def ml_skills() -> SkillSet:
         analysis_skills()
         .add(CodeSkill("ml", ml_code(), dependencies=["data", "viz"]))
     )
+
+
+def full_stack_skills() -> SkillSet:
+    """
+    The complete built-in skill stack.
+
+    Mirrors ``kerno.skills.bootstrap.bootstrap`` as a composable SkillSet:
+    data, viz, introspection, ML, stats, text, time series, synthetic data,
+    feature engineering, quality, reporting, web, and SQL.
+    """
+    from kerno.skills.builtins.data       import get_code as data_code
+    from kerno.skills.builtins.viz        import get_code as viz_code
+    from kerno.skills.builtins.introspect import get_code as introspect_code
+    from kerno.skills.builtins.ml         import get_code as ml_code
+    from kerno.skills.builtins.stats      import get_code as stats_code
+    from kerno.skills.builtins.text       import get_code as text_code
+    from kerno.skills.builtins.timeseries import get_code as timeseries_code
+    from kerno.skills.builtins.synthetic  import get_code as synthetic_code
+    from kerno.skills.builtins.features   import get_code as features_code
+    from kerno.skills.builtins.quality    import get_code as quality_code
+    from kerno.skills.builtins.report     import get_code as report_code
+    from kerno.skills.builtins.web        import get_code as web_code
+    from kerno.skills.builtins.sql        import get_code as sql_code
+
+    return (
+        SkillSet()
+        .add(CodeSkill("data",       data_code()))
+        .add(CodeSkill("viz",        viz_code(),        dependencies=["data"]))
+        .add(CodeSkill("introspect", introspect_code(), dependencies=["data"]))
+        .add(CodeSkill("ml",         ml_code(),         dependencies=["data", "viz"]))
+        .add(CodeSkill("stats",      stats_code(),      dependencies=["data"]))
+        .add(CodeSkill("text",       text_code(),       dependencies=["data"]))
+        .add(CodeSkill("timeseries", timeseries_code(), dependencies=["data", "viz"]))
+        .add(CodeSkill("synthetic",  synthetic_code(),  dependencies=["data"]))
+        .add(CodeSkill("features",   features_code(),   dependencies=["data", "ml"]))
+        .add(CodeSkill("quality",    quality_code(),    dependencies=["data"]))
+        .add(CodeSkill("report",     report_code(),     dependencies=["data"]))
+        .add(CodeSkill("web",        web_code()))
+        .add(CodeSkill("sql",        sql_code()))
+    )
+
+
+def nlp_skills() -> SkillSet:
+    """Text-oriented stack: data, viz, text, quality, and reporting."""
+    from kerno.skills.builtins.text    import get_code as text_code
+    from kerno.skills.builtins.quality import get_code as quality_code
+    from kerno.skills.builtins.report  import get_code as report_code
+    return (
+        analysis_skills()
+        .add(CodeSkill("text",    text_code(),    dependencies=["data"]))
+        .add(CodeSkill("quality", quality_code(), dependencies=["data"]))
+        .add(CodeSkill("report",  report_code(),  dependencies=["data"]))
+    )
+
+
+def timeseries_stack() -> SkillSet:
+    """Time-series stack with decomposition, forecasting, stats, and reporting."""
+    from kerno.skills.builtins.timeseries import get_code as timeseries_code
+    from kerno.skills.builtins.report     import get_code as report_code
+    return (
+        analysis_skills()
+        .add(CodeSkill("timeseries", timeseries_code(), dependencies=["data", "viz"]))
+        .add(CodeSkill("report",     report_code(),     dependencies=["data"]))
+    )
