@@ -170,6 +170,15 @@ from kerno.plugins             import BasePlugin, PluginRegistry
 from kerno.plugins.registry    import (
     CostEstimatorPlugin, NotebookPlugin, TimingPlugin,
 )
+from kerno.plugins.pack import (
+    powerful_pack,
+    ProgressPlugin,
+    TelemetryPlugin,
+    SafetyGuardrailPlugin,
+    ArtifactTrackerPlugin,
+    BudgetPlugin,
+    SessionQualityPlugin,
+)
 
 # ── Telemetry ────────────────────────────────────────────────────────────────
 
@@ -350,6 +359,9 @@ __all__ = [
     # Plugins
     "PluginRegistry", "BasePlugin",
     "TimingPlugin", "CostEstimatorPlugin", "NotebookPlugin",
+    "powerful_pack", "ProgressPlugin", "TelemetryPlugin",
+    "SafetyGuardrailPlugin", "ArtifactTrackerPlugin",
+    "BudgetPlugin", "SessionQualityPlugin",
 
     # Telemetry
     "get_tracer", "get_metrics", "get_logger",

@@ -314,6 +314,33 @@ result = run(task, llm=my_llm, plugins=plugins)
 # [cost]   Estimated: $0.0234  (~4,200 in tokens, ~890 out tokens)
 ```
 
+For production-grade sessions, use the powerful plugin pack:
+
+```python
+from kerno import run, powerful_pack
+
+plugins = powerful_pack(
+    notebook_path="sessions/live.ipynb",
+    telemetry_directory="_kerno/telemetry",
+    max_cells=50,
+    max_seconds=600,
+)
+
+result = run(task, llm=my_llm, plugins=plugins)
+```
+
+The pack combines:
+
+- `ProgressPlugin` — readable cell/session progress
+- `TimingPlugin` — cell and session timing
+- `CostEstimatorPlugin` — rough token/cost estimate
+- `BudgetPlugin` — cell/time/input/output budget tracking
+- `SafetyGuardrailPlugin` — static review for unsafe calls/imports/paths
+- `ArtifactTrackerPlugin` — discovers files saved by cells
+- `TelemetryPlugin` — structured JSONL lifecycle events
+- `SessionQualityPlugin` — error, recovery, image, and display summary
+- optional `NotebookPlugin` live notebook writing
+
 ---
 
 ## Architecture
