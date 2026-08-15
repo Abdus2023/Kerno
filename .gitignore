@@ -37,3 +37,6 @@ _checkpoints/
 # OS
 .DS_Store
 Thumbs.db
+
+# Test/generated artifacts
+_artifacts/

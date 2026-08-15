@@ -2,29 +2,10 @@
 """
 Default skill bootstrap: loads all built-in skills.
 
-Skill modules:
-    data_skills        load, profile, clean_nulls, checkpoint
-    viz_skills         plot_distributions, plot_correlation, plot_timeseries,
-                       plot_comparison, plot_scatter
-    introspect_skills  what_exists, schema_of, dependencies_of, memory_report, diagnose
-    ml_skills          split, train_classifier, train_regressor, evaluate_classifier,
-                       evaluate_regressor, cross_validate_model, feature_importance, preprocess
-    stats_skills       describe_distribution, ttest, anova, chi_square, bootstrap_ci, correlate
-    text_skills        text_stats, word_frequencies, clean_text, ngrams,
-                       sentiment_score, extract_emails, extract_hashtags, extract_keywords
-    timeseries_skills  ts_prepare, ts_decompose, ts_summary, ts_forecast_linear,
-                       ts_detect_anomalies, ts_seasonality_check
-    synthetic_skills   generate_sales, generate_customers, generate_classification,
-                       generate_regression, generate_timeseries, generate_transactions
-    features_skills    auto_encode, add_date_features, add_interaction_features,
-                       add_aggregation_features, add_lag_features, select_features
-    quality_skills     quality_report, detect_duplicates, detect_outliers,
-                       validate_schema, detect_drift
-    report_skills      generate_report, summary_table, comparison_table,
-                       executive_summary, data_dictionary, save_results
-    web_skills         fetch, fetch_json, extract_tables, read_csv_url
-    sql_skills         connect, connect_sqlite, query, list_tables,
-                       schema_of_table, execute_sql, table_stats
+The default set intentionally spans the complete analytical vocabulary:
+wrangling, visualization, introspection, ML, statistics, text/NLP, time series,
+synthetic data, feature engineering, quality, reporting, documents, graphs,
+optimization, experimentation, meta-skills, web, and SQL.
 """
 
 from kerno.kernel.runtime             import KernelRuntime
@@ -41,6 +22,19 @@ from kerno.skills.builtins.quality    import get_code as quality_code
 from kerno.skills.builtins.report     import get_code as report_code
 from kerno.skills.builtins.web        import get_code as web_code
 from kerno.skills.builtins.sql        import get_code as sql_code
+from kerno.skills.builtins.llm_tools  import get_code as llm_tools_code
+from kerno.skills.builtins.nlp        import get_code as nlp_code
+from kerno.skills.builtins.network    import get_code as network_code
+from kerno.skills.builtins.anomaly    import get_code as anomaly_code
+from kerno.skills.builtins.docs       import get_code as docs_code
+from kerno.skills.builtins.artifacts  import get_code as artifacts_code
+from kerno.skills.builtins.simulation import get_code as simulation_code
+from kerno.skills.builtins.finance    import get_code as finance_code
+from kerno.skills.builtins.graph      import get_code as graph_code
+from kerno.skills.builtins.optimization import get_code as optimization_code
+from kerno.skills.builtins.experiment import get_code as experiment_code
+from kerno.skills.builtins.meta       import get_code as meta_code
+from kerno.skills.builtins.export     import get_code as export_code
 from kerno.skills.registry            import SkillRegistry
 
 
@@ -48,14 +42,27 @@ _SKILL_MODULES = [
     ("data_skills",       data_code),
     ("viz_skills",        viz_code),
     ("introspect_skills", introspect_code),
+    ("meta_skills",       meta_code),
     ("ml_skills",         ml_code),
     ("stats_skills",      stats_code),
     ("text_skills",       text_code),
+    ("nlp_skills",        nlp_code),
     ("timeseries_skills", timeseries_code),
     ("synthetic_skills",  synthetic_code),
     ("features_skills",   features_code),
     ("quality_skills",    quality_code),
+    ("anomaly_skills",    anomaly_code),
     ("report_skills",     report_code),
+    ("artifacts_skills",  artifacts_code),
+    ("export_skills",     export_code),
+    ("docs_skills",       docs_code),
+    ("network_skills",    network_code),
+    ("graph_skills",      graph_code),
+    ("simulation_skills", simulation_code),
+    ("optimization_skills", optimization_code),
+    ("finance_skills",    finance_code),
+    ("experiment_skills", experiment_code),
+    ("llm_tools_skills",  llm_tools_code),
     ("web_skills",        web_code),
     ("sql_skills",        sql_code),
 ]
@@ -98,14 +105,15 @@ def bootstrap_ml(kernel: KernelRuntime) -> SkillRegistry:
     """Full data science stack."""
     return bootstrap(kernel, include=[
         "data_skills", "viz_skills", "ml_skills", "stats_skills",
-        "features_skills", "quality_skills",
+        "features_skills", "quality_skills", "anomaly_skills",
     ])
 
 
 def bootstrap_nlp(kernel: KernelRuntime) -> SkillRegistry:
     """Text analysis stack."""
     return bootstrap(kernel, include=[
-        "data_skills", "viz_skills", "text_skills", "quality_skills", "report_skills",
+        "data_skills", "viz_skills", "text_skills", "nlp_skills",
+        "quality_skills", "report_skills",
     ])
 
 
@@ -114,4 +122,24 @@ def bootstrap_timeseries(kernel: KernelRuntime) -> SkillRegistry:
     return bootstrap(kernel, include=[
         "data_skills", "viz_skills", "timeseries_skills",
         "stats_skills", "report_skills",
+    ])
+
+
+def bootstrap_research(kernel: KernelRuntime) -> SkillRegistry:
+    """Research stack including NLP, experiments, optimization, and self-extension."""
+    return bootstrap(kernel, include=[
+        "data_skills", "viz_skills", "introspect_skills", "meta_skills",
+        "ml_skills", "stats_skills", "text_skills", "nlp_skills",
+        "timeseries_skills", "features_skills", "quality_skills",
+        "anomaly_skills", "experiment_skills", "optimization_skills",
+        "report_skills", "export_skills",
+    ])
+
+
+def bootstrap_quant(kernel: KernelRuntime) -> SkillRegistry:
+    """Quantitative finance stack."""
+    return bootstrap(kernel, include=[
+        "data_skills", "viz_skills", "introspect_skills",
+        "stats_skills", "timeseries_skills", "finance_skills",
+        "optimization_skills", "meta_skills",
     ])
