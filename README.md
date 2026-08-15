@@ -31,6 +31,12 @@ pip install "kerno[anthropic]"
 # With OpenAI
 pip install "kerno[openai]"
 
+# Optional skill packs
+pip install "kerno[timeseries]"   # statsmodels decomposition/forecasting
+pip install "kerno[nlp]"          # NLTK sentiment
+pip install "kerno[graphs]"       # networkx analysis
+pip install "kerno[documents]"    # PDF / DOCX parsing
+
 # Full stack
 pip install "kerno[all]"
 ```
@@ -79,10 +85,12 @@ print(result.status, result.cells_executed)
 
 ## Built-in Skills
 
-Loaded into every kernel automatically:
+The default bootstrap loads a full analytical workstation into the kernel. Skills
+follow one contract: they print/display rich notebook output *and* return
+structured objects for the next cell.
 
 ```python
-# Data
+# Data wrangling
 df = load("data.csv")
 stats = profile(df)
 df_clean = clean_nulls(df, strategy="fill")
@@ -95,25 +103,86 @@ plot_timeseries(df, "date", ["revenue", "units"])
 plot_comparison(df, "region", "revenue")
 plot_scatter(df, "discount", "churn_rate", color_col="segment")
 
-# ML
+# ML & statistics
 splits = split(df, target="churn_flag")
 model  = train_classifier(splits["X_train"], splits["y_train"])
-cv     = cross_validate_model(model, X, y)
 metrics = evaluate_classifier(model, splits["X_test"], splits["y_test"])
-importances = feature_importance(model, splits["feature_names"])
-
-# Statistics
 ttest(group_a, group_b)
-anova(group_1, group_2, group_3)
 bootstrap_ci(series, statistic=np.median)
-correlate(x, y)
 
-# Introspection
-what_exists()
-schema_of("df")
-diagnose("model")
-memory_report()
+# Text & NLP
+text_stats(df["review"])
+word_frequencies(df["review"])
+sentiment_score(df["review"])
+extract_emails(df["support_ticket"])
+analyze_sentiment(df["review"])             # VADER
+topic_model(df["review"], n_topics=5)
+
+# Time series
+ts = ts_prepare(df, "date", "revenue")
+ts_decompose(ts, period=7)
+ts_forecast_linear(ts, horizon=30)
+ts_detect_anomalies(ts, method="zscore")
+
+# Feature engineering & quality
+X, y, report = auto_encode(df, target="churn_flag")
+X = add_date_features(X, "signup_date")
+quality_report(df)
+detect_outliers(df, columns=["revenue"])
+detect_data_drift(train_df, test_df)         # Isolation Forest in anomaly.py
+
+# Synthetic data & simulation
+sales = generate_sales(5000)
+customers = generate_customers(2000)
+sim = monte_carlo(profit_trial, n_sims=10000)
+
+# Graphs, optimization, finance
+G = build_network(edges, "source", "target", weight="w")
+analyze_network(G)
+solve_assignment(cost_matrix)
+capm_beta(asset_returns, market_returns)
+ab_test(control, variant, metric_type="binary")
+
+# Reporting & artifacts
+generate_report("Q3 Analysis", sections=[...], save_path="report.md")
+to_html_dashboard("Dashboard", blocks=[...], filename="dash.html")
+to_excel_report("workbook.xlsx", {"Summary": summary_df})
+
+# Meta-skills
+search_skills("forecast")
+register_skill("my_helper", "def my_helper(): ...")
 ```
+
+### Skill inventory
+
+| Module | Key capabilities |
+|--------|------------------|
+| `data` | `load`, `profile`, `clean_nulls`, `checkpoint` |
+| `viz` | distributions, correlations, time-series, comparisons, scatter |
+| `introspect` | `what_exists`, `schema_of`, `diagnose`, `search_skills` |
+| `ml` | splitting, classifiers/regressors, CV, feature importance |
+| `stats` | t-test, ANOVA, chi-square, bootstrap CI, correlation |
+| `text` | text stats, word frequencies, n-grams, regex extraction, rule sentiment |
+| `nlp` | VADER sentiment, LDA topics, document clustering, TF-IDF search |
+| `timeseries` | prepare, decompose, summary, linear forecast, anomaly/seasonality |
+| `synthetic` / `synth` | sales, customers, classification/regression, TS, transactions, PII masking |
+| `features` | encoding, date/interaction/aggregation/lag features, selection |
+| `quality` / `anomaly` | audit, duplicates, outliers, schema validation, drift, missingness |
+| `report` / `artifacts` / `export` | markdown/HTML/Excel reports and saved artifacts |
+| `docs` | PDF & DOCX parsing, text chunking, entity extraction |
+| `network` / `graph` | graph construction, centrality, community detection, plotting |
+| `simulation` / `optimization` | Monte Carlo, linear programs, assignment, portfolio optimization |
+| `finance` | returns, rolling metrics, drawdown, CAPM beta |
+| `experiment` | power analysis, A/B testing |
+| `meta` | self-registering skills, inspection, search |
+| `llm_tools` | `llm_map`, zero-shot classification, JSON extraction, semantic search |
+| `api` / `web` / `filesystem` | REST pagination, downloads, URL tables, file discovery/merging |
+| `sql` | connections, queries, schema inspection, table stats |
+
+Presets are available via `bootstrap_minimal`, `bootstrap_ml`, `bootstrap_nlp`,
+`bootstrap_timeseries`, `bootstrap_research`, and `bootstrap_quant`, or through
+the composable `full_stack_skills()`, `nlp_skills()`, and `timeseries_stack()`
+builders.
 
 ---
 
@@ -255,7 +324,9 @@ kerno/
 ├── loop/            ReactiveLoop, ReflectReviseLoop, PlanExecuteLoop,
 │                    HierarchicalLoop, MultiAgentLoop, DebateLoop
 ├── context/         PromptBuilder, HistoryCompressor
-├── skills/          SkillRegistry + builtins (data, viz, ml, stats, web, sql)
+├── skills/          SkillRegistry + 29 built-in modules (data, viz, ml,
+│                    stats, text, nlp, timeseries, synthetic, features,
+│                    quality, anomaly, report, graph, simulation, llm_tools, …)
 ├── errors/          ErrorClassifier, RecoveryStrategy
 ├── memory/          SimpleMemoryStore, ChromaMemoryStore
 ├── security/        AllowList, InputSanitizer
