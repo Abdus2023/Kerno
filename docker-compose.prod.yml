@@ -1,0 +1,102 @@
+# docker-compose.prod.yml
+# Production stack: Kerno + Open WebUI + Nginx
+
+version: "3.8"
+
+services:
+
+  # ── Kerno Agent Server ────────────────────────────────────────────────────
+  kerno:
+    build:
+      context: .
+      dockerfile: Dockerfile.kerno
+    ports:
+      - "8001:8001"
+    environment:
+      # LLM
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - KERNO_MODEL=${KERNO_MODEL:-anthropic/claude-opus-4-5}
+
+      # Auth (comma-separated: key:userid:name)
+      - KERNO_API_KEYS=${KERNO_API_KEYS:-}
+
+      # Resources
+      - KERNO_POOL_SIZE=${KERNO_POOL_SIZE:-5}
+      - KERNO_MAX_CELLS=${KERNO_MAX_CELLS:-50}
+
+      # Storage
+      - KERNO_MEMORY_PATH=/data/memory.json
+      - KERNO_LOG_PATH=/data/kerno.log
+      - KERNO_SESSIONS_PATH=/sessions
+
+      # Features
+      - KERNO_ENABLE_AUTH=${KERNO_ENABLE_AUTH:-false}
+      - KERNO_ENABLE_MEMORY=${KERNO_ENABLE_MEMORY:-true}
+
+    volumes:
+      - kerno_data:/data
+      - kerno_sessions:/sessions
+      - ./skills:/skills:ro    # Mount custom skills directory
+
+    restart: unless-stopped
+
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8001/health"]
+      interval: 30s
+      timeout:  10s
+      retries:  3
+      start_period: 15s
+
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+          cpus: "4"
+
+  # ── Open WebUI ─────────────────────────────────────────────────────────────
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    ports:
+      - "${WEBUI_PORT:-3000}:8080"
+    environment:
+      # Connect to Kerno as the primary backend
+      - OPENAI_API_BASE_URL=http://kerno:8001/v1
+      - OPENAI_API_KEY=${KERNO_WEBUI_KEY:-kerno-local}
+
+      # Also connect directly to OpenRouter for non-agent queries
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+
+      # WebUI settings
+      - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY}
+      - WEBUI_NAME=Kerno Agent
+      - DEFAULT_MODELS=kerno-agent
+      - ENABLE_SIGNUP=${ENABLE_SIGNUP:-true}
+
+    volumes:
+      - open_webui_data:/app/backend/data
+      - ./pipelines:/app/backend/data/pipelines:ro  # Auto-load pipelines
+
+    depends_on:
+      kerno:
+        condition: service_healthy
+
+    restart: unless-stopped
+
+  # ── Nginx Reverse Proxy ───────────────────────────────────────────────────
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./certs:/etc/nginx/certs:ro   # TLS certificates
+    depends_on:
+      - open-webui
+      - kerno
+    restart: unless-stopped
+
+volumes:
+  kerno_data:
+  kerno_sessions:
+  open_webui_data:

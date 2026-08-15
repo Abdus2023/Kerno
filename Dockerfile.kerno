@@ -1,0 +1,26 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# System dependencies for Jupyter kernel
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Install kerno
+COPY . .
+RUN pip install -e ".[all]"
+
+# Create data directories
+RUN mkdir -p /data /sessions
+
+# Health check endpoint comes from the kerno server
+EXPOSE 8001
+
+CMD ["python", "-m", "kerno.server.start"]

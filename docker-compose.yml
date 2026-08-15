@@ -1,0 +1,53 @@
+# docker-compose.yml
+# Full stack: Open WebUI + Kerno + OpenRouter
+
+version: "3.8"
+
+services:
+
+  # ── Kerno Agent Server ────────────────────────────────────────────────────
+  kerno:
+    build:
+      context: .
+      dockerfile: Dockerfile.kerno
+    ports:
+      - "8001:8001"
+    environment:
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - KERNO_MODEL=${KERNO_MODEL:-anthropic/claude-opus-4-5}
+      - KERNO_POOL_SIZE=${KERNO_POOL_SIZE:-3}
+      - KERNO_MAX_CELLS=${KERNO_MAX_CELLS:-50}
+      - KERNO_MEMORY_PATH=/data/memory.json
+      - KERNO_LOG_PATH=/data/kerno.log
+    volumes:
+      - kerno_data:/data
+      - kerno_sessions:/sessions
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ── Open WebUI ─────────────────────────────────────────────────────────────
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    ports:
+      - "3000:8080"
+    environment:
+      - OPENAI_API_BASE_URL=http://kerno:8001/v1
+      - OPENAI_API_KEY=kerno-local   # Open WebUI requires a key, any string works
+      - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY:-changeme}
+      # Optional: also connect to OpenRouter directly for non-agent queries
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+    volumes:
+      - open_webui_data:/app/backend/data
+    depends_on:
+      kerno:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  kerno_data:
+  kerno_sessions:
+  open_webui_data:

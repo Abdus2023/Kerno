@@ -1,0 +1,12 @@
+DONE ✓                          NEXT
+──────────────────────          ──────────────────────────────
+kerno/types.py                  kerno/kernel/pool.py
+kerno/kernel/output.py          kerno/loop/plan_execute.py
+kerno/kernel/snapshot.py        kerno/errors/classifier.py
+kerno/kernel/runtime.py         kerno/skills/registry.py
+kerno/context/builder.py        kerno/audit/notebook.py
+kerno/context/compressor.py     kerno/skills/builtins/
+kerno/loop/base.py              tests/unit/
+kerno/loop/reactive.py          tests/behavioral/
+kerno/loop/reflect.py
+kerno/__init__.py
