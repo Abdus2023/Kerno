@@ -242,6 +242,16 @@ This traceability report provides an auditable, bidirectional map linking every 
 
 ---
 
+### Round 23: Streaming Transaction Parity Refactoring & Adversarial Verification
+* **Goal**: Unify `execute()` and `stream_execute()` under a single canonical transaction lifecycle (`_prepare_transaction`, `_finalize_transaction`), implement Model C streaming error handling, enforce standalone Compose resource limits, and add strict adversarial assertions (`assert kernel.calls == []`).
+* **Key Artifacts**:
+  * `kerno/execution/engine.py`: Refactored to eliminate governance divergence, ensuring human approval, effects, actions, and event lifecycles are identical across all execution modes.
+  * `docker-compose.security.yml`: Added standalone service-level constraints (`mem_limit: 512m`, `cpus: 1.0`, `pids_limit: 64`).
+  * `tests/unit/test_execution_engine.py`: Added `test_adversarial_code_never_touches_kernel_backend` verifying zero backend reach on blocked inputs.
+  * `docs/TRACEABILITY_REPORT.md`: Updated living traceability records and calibrated release status.
+
+---
+
 ## 3. Formal Invariants Traceability Matrix
 
 | Invariant ID | Formal Property Description | Enforcing Code Location | Verification Test File |

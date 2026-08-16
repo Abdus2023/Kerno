@@ -56,6 +56,9 @@ services:
       - ALL                          # Drop all Linux privileges
     security_opt:
       - no-new-privileges:true       # Prevent privilege escalation
+    mem_limit: 512m                  # Enforced in standalone Compose mode
+    cpus: 1.0
+    pids_limit: 64                   # Guard against fork-bombs
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=128m
       - /run:rw,noexec,nosuid,size=32m
@@ -64,7 +67,7 @@ services:
         limits:
           cpus: "1.0"
           memory: 512M
-          pids: 64                   # Guard against fork-bombs
+          pids: 64                   # Guard against fork-bombs in Swarm mode
 
 volumes:
   kerno_sessions:

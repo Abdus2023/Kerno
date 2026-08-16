@@ -107,6 +107,19 @@ class ExecutionEvent:
     payload:       dict  = field(default_factory=dict)
 
 
+@dataclass
+class _TxContext:
+    allowed:            bool
+    execution_id:       str
+    code_preview:       str
+    caps:               frozenset[str]
+    declared_effects:   frozenset[str]
+    action_sm:          Optional[ActionStateMachine]
+    attrs:              dict
+    denial_output:      Optional[CellOutput] = None
+    denial_error_tuple: Optional[tuple[str, str]] = None
+
+
 class ExecutionEngine:
     """
     Policy-enforcing executor that delegates to a KernelRuntime.
@@ -622,10 +635,13 @@ class ExecutionEngine:
                         text = self._redact(text)
                     yield (kind, text)
             else:
-                out = self.execute(
-                    code, timeout=timeout, origin=origin, capabilities=capabilities,
-                    subject=subject, cancel_event=cancel_event,
-                )
+                exec_kwargs = {}
+                if cancel_event is not None and self._supports_cancel():
+                    exec_kwargs["cancel_event"] = cancel_event
+                out = self._kernel.execute(code, timeout=timeout, silent=False, **exec_kwargs)
+                out.execution_id = execution_id
+                if origin == ORIGIN_AGENT:
+                    out = self._redact_output(out)
                 had_error = out.has_error
                 if out.stdout:
                     yield ("stdout", out.stdout)
@@ -639,7 +655,6 @@ class ExecutionEngine:
             if action_sm is not None:
                 action_sm.transition(ActionStatus.FAILURE, reason="streaming raised")
             yield ("error", f"StreamExecutionError: {str(exc)}")
-            raise
         finally:
             dur_ms = (time.monotonic() - start) * 1000
 

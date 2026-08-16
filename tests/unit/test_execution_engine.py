@@ -560,8 +560,10 @@ class TestEngineStreamExecute:
                 raise RuntimeError("kernel crashed mid-stream")
 
         engine = ExecutionEngine(ExplodingStreamKernel())
-        with pytest.raises(RuntimeError):
-            list(engine.stream_execute("x = 1"))
+        chunks = list(engine.stream_execute("x = 1"))
+        assert len(chunks) == 1
+        assert chunks[0][0] == "error"
+        assert "StreamExecutionError" in chunks[0][1]
 
         # Invariant P1 / K-005: EXECUTION_COMPLETED must still be emitted in finally
         event_types = [e.event_type for e in engine.events]
@@ -600,3 +602,23 @@ class TestAdversarialCapabilityAcquisition:
         for code in bypasses:
             with pytest.raises(AllowListViolation):
                 al.check(code)
+
+
+    def test_adversarial_code_never_touches_kernel_backend(self):
+        kernel = FakeKernel()
+        engine = ExecutionEngine(kernel, allowlist=AllowList.data_analysis())
+
+        bypasses = [
+            "__import__('os')",
+            "import subprocess\nsubprocess.run(['rm', '-rf', '/'])",
+            "import socket\ns = socket.socket()",
+            "import ctypes\nctypes.CDLL(None)",
+        ]
+
+        for code in bypasses:
+            out = engine.execute(code)
+            assert out.has_error
+            assert out.error.ename == "AllowListViolation"
+
+        # Invariant K-001 / Gate A: None of the blocked code ever reached the backend
+        assert kernel.calls == []
