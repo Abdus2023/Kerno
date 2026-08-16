@@ -218,3 +218,22 @@ class TestAPIKeyStoreHardening:
         entries = list(store._keys.values())
         assert len(entries) == 2
         assert entries[0]["salt_hex"] != entries[1]["salt_hex"]
+
+
+    @pytest.mark.asyncio
+    async def test_auth_fails_closed_when_auth_enabled_and_no_keys(self, monkeypatch):
+        import os
+        from kerno.server.auth import verify_api_key
+
+        # Simulate production / auth_enabled with no keys set
+        monkeypatch.setenv("KERNO_ENABLE_AUTH", "true")
+        monkeypatch.delenv("KERNO_API_KEYS", raising=False)
+
+        try:
+            from fastapi import HTTPException
+            with pytest.raises(HTTPException) as exc_info:
+                await verify_api_key(None)
+            assert exc_info.value.status_code == 401
+            assert "fail closed" in exc_info.value.detail
+        except ImportError:
+            pass

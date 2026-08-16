@@ -252,6 +252,17 @@ This traceability report provides an auditable, bidirectional map linking every 
 
 ---
 
+### Round 24: Canonical Transaction Pipeline, Indirect AST Defense & Production Auth Gate
+* **Goal**: Concrete code-level verification of canonical `_prepare_transaction()` and `_finalize_transaction()` pipelines, closing indirect AST builtin access vectors, filtering dangerous stdlib modules from the in-kernel import hook, enforcing monotonic sequence capture, and making production authentication fail closed.
+* **Key Artifacts**:
+  * `kerno/execution/engine.py`: Verified `_prepare_transaction()` and `_finalize_transaction()` in codebase; sequence number captured at transaction creation time to prevent concurrency sequence races.
+  * `kerno/security/allowlist.py`: Added AST inspection against indirect builtin access (`getattr`, `hasattr`, `__builtins__`, `_original_import`, and subscript access) and filtered `_dangerous` system modules from runtime stdlib allowance.
+  * `kerno/server/auth.py`: Implemented fail-closed behavior for `verify_api_key` in production mode or when `KERNO_ENABLE_AUTH=true`.
+  * `tests/unit/test_execution_engine.py` & `test_server_security.py`: Added regression tests for indirect AST bypasses, sequence monotonicity, and auth fail-closed behavior.
+  * `docs/TRACEABILITY_REPORT.md`: Synchronized living traceability matrix and invariant checks.
+
+---
+
 ## 3. Formal Invariants Traceability Matrix
 
 | Invariant ID | Formal Property Description | Enforcing Code Location | Verification Test File |

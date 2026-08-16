@@ -95,10 +95,18 @@ class AllowList:
                         "disallowed_import", f"import {module}"
                     )
 
-        # AST analysis (defense-in-depth against whitespace/syntax obfuscation)
+        # AST analysis (defense-in-depth against whitespace/syntax obfuscation & semantic bypasses)
         try:
             tree = ast.parse(code)
             for node in ast.walk(tree):
+                # 1. Direct Name access to dangerous internal namespaces or blocked builtins
+                if isinstance(node, ast.Name):
+                    if node.id in ("__builtins__", "_builtins", "_original_import", "_orig"):
+                        raise AllowListViolation(
+                            "internal_namespace_access", f"access to '{node.id}' is forbidden"
+                        )
+
+                # 2. Import & ImportFrom restrictions
                 if self.allowed_modules:
                     if isinstance(node, ast.Import):
                         for alias in node.names:
@@ -120,10 +128,28 @@ class AllowList:
                                 raise AllowListViolation(
                                     "disallowed_import", f"from {module} import ..."
                                 )
+
+                # 3. Blocked builtin calls (direct: eval(...), __import__(...))
                 if self.blocked_builtins and isinstance(node, ast.Call):
                     if isinstance(node.func, ast.Name) and node.func.id in self.blocked_builtins:
                         raise AllowListViolation(
                             f"blocked_builtin:{node.func.id}", node.func.id
+                        )
+
+                # 4. Indirect getattr/hasattr bypasses: getattr(obj, "__import__"), getattr(os, "system")
+                if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in ("getattr", "hasattr"):
+                    for arg in node.args:
+                        if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                            if arg.value in self.blocked_builtins or arg.value in ("system", "popen", "spawn", "exec", "eval"):
+                                raise AllowListViolation(
+                                    "getattr_bypass", f"getattr with forbidden attribute '{arg.value}'"
+                                )
+
+                # 5. Indirect subscript bypasses: __builtins__["__import__"]
+                if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Constant) and isinstance(node.slice.value, str):
+                    if node.slice.value in self.blocked_builtins:
+                        raise AllowListViolation(
+                            "subscript_bypass", f"subscript with forbidden key '{node.slice.value}'"
                         )
         except SyntaxError:
             # Non-python syntax (e.g. IPython magics/shell escapes) already handled by regex pass
@@ -249,7 +275,8 @@ class AllowList:
             (the previous implementation re-entered itself via
             `import importlib.util` and wedged the kernel with infinite
             recursion).
-          - Stdlib modules are always allowed, via sys.stdlib_module_names.
+          - Stdlib modules are allowed ONLY if they are not in the dangerous
+            system modules list (os, subprocess, socket, ctypes, shutil, importlib, etc.).
           - Modules already loaded in sys.modules are allowed: the
             capability was already granted when they were first imported,
             and ipykernel internals lazily re-import them.
@@ -266,8 +293,13 @@ def _kerno_install_import_hook():
     import sys as _sys
     import builtins as _builtins
 
-    _allowed = {allowed_repr}
+    _allowed = set({allowed_repr})
     _orig = _builtins.__import__
+    _dangerous = frozenset({{
+        "os", "subprocess", "sys", "socket", "shutil", "ctypes", "importlib",
+        "posix", "nt", "signal", "multiprocessing", "threading", "asyncio",
+        "pty", "commands", "pdb", "inspect", "_thread", "gc",
+    }})
 
     def _restricted_import(name, *args, **kwargs):
         # Relative imports (level > 0) are internal machinery — always allow.
@@ -275,17 +307,21 @@ def _kerno_install_import_hook():
         if level > 0:
             return _orig(name, *args, **kwargs)
         top_level = name.split('.')[0]
+        # Block dangerous system modules unless explicitly declared in allowlist
+        if top_level in _dangerous:
+            if top_level not in _allowed and not any(a.startswith(top_level + ".") for a in _allowed):
+                raise ImportError(f"Module '{{name}}' is restricted by security policy.")
         if top_level in _allowed:
             return _orig(name, *args, **kwargs)
-        # Already-loaded modules: capability was granted at first import
-        if top_level in _sys.modules:
+        # Already-loaded modules (if not dangerous):
+        if top_level in _sys.modules and top_level not in _dangerous:
             return _orig(name, *args, **kwargs)
-        # Standard library: always available
-        if top_level in getattr(_sys, 'stdlib_module_names', ()):
+        # Safe Standard library modules only:
+        if top_level in getattr(_sys, 'stdlib_module_names', ()) and top_level not in _dangerous:
             return _orig(name, *args, **kwargs)
         raise ImportError(
             f"Module '{{name}}' is not in the kerno allowlist. "
-            f"Available: {{_allowed[:5]}}..."
+            f"Available: {{sorted(list(_allowed))[:5]}}..."
         )
 
     _builtins.__import__ = _restricted_import

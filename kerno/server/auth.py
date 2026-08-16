@@ -156,8 +156,16 @@ if HAS_FASTAPI:
         """
         import os
 
-        # If no keys configured, allow all (development mode)
+        # If auth is explicitly enabled or in production mode, fail closed when no keys are configured
+        auth_enabled  = os.environ.get("KERNO_ENABLE_AUTH", "").lower() in ("true", "1", "yes")
+        is_production = os.environ.get("KERNO_RUNTIME_MODE", "").lower() == "production"
+
         if not os.environ.get("KERNO_API_KEYS"):
+            if auth_enabled or is_production:
+                raise HTTPException(
+                    status_code = 401,
+                    detail      = "Authentication is enabled (or running in production mode) but no API keys are configured on server (fail closed)",
+                )
             return {"user_id": "anonymous", "rate_limit": 1000, "max_cells": 50}
 
         if not credentials:

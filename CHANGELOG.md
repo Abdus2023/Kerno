@@ -6,6 +6,11 @@ implementation phases (see `docs/kerno-deep-audit.md`).
 ## [0.2.1-dev] — 2026-08-16 (Traceability & Phase D/E Hardening)
 
 ### Security & Hardening (Phase D)
+- **Canonical Execution Transaction Pipeline** — implemented `_prepare_transaction()` and `_finalize_transaction()` in `ExecutionEngine`, ensuring 100% semantic and lifecycle parity between synchronous and streaming execution modes (`K-001`).
+- **Indirect AST Builtin Defense** — enhanced `AllowList.check()` to intercept indirect builtin access via `getattr()`, `hasattr()`, `__builtins__`, `_original_import`, and dictionary subscript lookups in `kerno/security/allowlist.py`.
+- **Dangerous Stdlib Filter in Runtime Hook** — filtered dangerous system modules (`os`, `subprocess`, `sys`, `socket`, `ctypes`, `shutil`, `importlib`, etc.) from automatic standard library allowance in `to_kernel_code()`.
+- **Production Authentication Fail-Closed** — enforced fail-closed behavior on `verify_api_key()` when `KERNO_ENABLE_AUTH=true` or running in production mode with missing API keys in `kerno/server/auth.py`.
+- **ExecutionRecord Monotonic Sequence Capture** — captured sequence number at transaction preparation time to prevent concurrency sequence collisions in `kerno/execution/engine.py`.
 - **ExecutionEngine Streaming Choke Point** — added `stream_execute()` to `ExecutionEngine`, enforcing capability authorization, allowlist inspection, and secret redaction on all streamed execution chunks (`K-001`).
 - **Import Hook Closure Encapsulation** — encapsulated `_restricted_import` in a closure and deleted helper references from kernel `globals()`, eliminating `_original_import` escape routes in `kerno/security/allowlist.py`.
 - **SharedMemory Deep-Copy Mutation Isolation** — enforced deep-copying on `put()`, `get()`, and `items()` in `kerno/isolation.py`, preventing mutable reference contamination on the host (`K-009`).

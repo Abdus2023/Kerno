@@ -622,3 +622,40 @@ class TestAdversarialCapabilityAcquisition:
 
         # Invariant K-001 / Gate A: None of the blocked code ever reached the backend
         assert kernel.calls == []
+
+
+    def test_indirect_builtin_acquisition_blocked(self):
+        kernel = FakeKernel()
+        engine = ExecutionEngine(kernel, allowlist=AllowList.data_analysis())
+
+        indirect_bypasses = [
+            "getattr(__builtins__, '__import__')('subprocess')",
+            "getattr(__builtins__, 'eval')('1+1')",
+            "__builtins__['__import__']('os')",
+            "b = __builtins__\nb.eval('1+1')",
+            "_original_import('os')",
+        ]
+
+        for code in indirect_bypasses:
+            out = engine.execute(code)
+            assert out.has_error
+            assert out.error.ename == "AllowListViolation"
+
+        # Gate A: none of the indirect bypasses reached the backend
+        assert kernel.calls == []
+
+    def test_execution_sequence_monotonic_under_transaction_prep(self):
+        kernel = FakeKernel()
+        engine = ExecutionEngine(kernel)
+
+        out1 = engine.execute("x = 1")
+        out2 = engine.execute("x = 2")
+
+        rec1 = engine.records[0]
+        rec2 = engine.records[1]
+
+        # Monotonic execution sequence numbers matching execution_id
+        assert rec1.sequence == 1
+        assert rec1.execution_id == "exec_00000001"
+        assert rec2.sequence == 2
+        assert rec2.execution_id == "exec_00000002"

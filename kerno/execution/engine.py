@@ -111,6 +111,7 @@ class ExecutionEvent:
 class _TxContext:
     allowed:            bool
     execution_id:       str
+    sequence:           int
     code_preview:       str
     caps:               frozenset[str]
     declared_effects:   frozenset[str]
@@ -215,49 +216,31 @@ class ExecutionEngine:
 
     # ── Execution (the choke point) ────────────────────────────────────────────
 
-    def execute(
+    def _prepare_transaction(
         self,
-        code:               str,
-        timeout:            float = 120.0,
-        silent:             bool  = False,
-        origin:             str   = ORIGIN_AGENT,
-        capabilities:       Optional[frozenset[str]] = None,
-        subject:            str   = "",
-        action:             Optional[Action] = None,
-        effects:            Optional[frozenset[str]] = None,
-        approval_description: str = "",
-        cancel_event:       Optional[object] = None,
-    ) -> CellOutput:
-        """
-        Execute code through the authorization + policy boundary.
+        code:                 str,
+        origin:               str,
+        capabilities:         Optional[frozenset[str]],
+        subject:              str,
+        action:               Optional[Action],
+        effects:              Optional[frozenset[str]],
+        approval_description: str,
+        cancel_event:         Optional[object],
+        silent:               bool,
+    ) -> _TxContext:
+        execution_seq    = self._sequence + 1
+        execution_id     = "exec_{:08d}".format(execution_seq)
+        self._sequence   = execution_seq
 
-        Agent-origin code is checked against the capability broker (if
-        capabilities are declared) and the allowlist (if configured);
-        violations return a synthetic error without touching the kernel.
-        Every attempt produces an ExecutionRecord and events.
-
-        Additional contracts:
-          - action:   when given, its ActionStateMachine is driven to an
-                      explicit terminal state (P10) and the action_id is
-                      correlated into records and events (audit #46/#78).
-          - effects:  declared side effects (audit #92). When an
-                      EffectLedger is attached, undeclared filesystem
-                      writes are reported as effect violations (#93).
-          - approval: if capabilities include human.approval, the
-                      ApprovalGate is consulted — FAIL CLOSED when no
-                      gate is installed (audit #90).
-        """
-        execution_id = self._next_execution_id()
-        code_preview = self._redact(code[:80].replace("\n", " "))
-        caps         = (
+        code_preview     = self._redact(code[:80].replace("\n", " "))
+        caps             = (
             self._default_capabilities if capabilities is None
             else frozenset(capabilities)
         )
         declared_effects = frozenset(effects or ())
-        action_sm = ActionStateMachine(action) if action is not None else None
+        action_sm        = ActionStateMachine(action) if action is not None else None
         if action_sm is not None:
-            action_sm.transition(ActionStatus.AUTHORIZING,
-                                 reason="engine authorization")
+            action_sm.transition(ActionStatus.AUTHORIZING, reason="engine authorization")
 
         attrs = {
             "execution.id":     execution_id,
@@ -279,178 +262,278 @@ class ExecutionEngine:
                    action_id=action.action_id if action else None,
                    capabilities=sorted(caps) if caps else [])
 
-        with self._tracer.span("execution.attempt", attrs):
-            # ── 1. Authorization (capability broker) ─────────────────────
-            if origin == ORIGIN_AGENT and self._broker is not None and caps:
-                try:
-                    self._require_all(caps, subject)
-                except CapabilityViolation as exc:
-                    return self._deny(
-                        execution_id = execution_id,
-                        origin       = origin,
-                        code_preview = code_preview,
-                        rule         = "capability:" + exc.name,
-                        ename        = "CapabilityViolation",
-                        evalue       = str(exc),
-                        caps         = caps,
-                        action_sm    = action_sm,
-                        event_type   = EVT_CAPABILITY_DENIED,
-                        event_payload = {"capability": exc.name,
-                                         "subject": exc.subject},
-                    )
-
-            # ── 1b. Human approval (audit #90) — fail closed ─────────────
-            if origin == ORIGIN_AGENT and CAP_HUMAN_APPROVAL in caps:
-                if self._approval_gate is None:
-                    return self._deny(
-                        execution_id = execution_id,
-                        origin       = origin,
-                        code_preview = code_preview,
-                        rule         = "approval:no_gate",
-                        ename        = "ApprovalDenied",
-                        evalue       = (
-                            "execution requires human.approval but no "
-                            "ApprovalGate is installed (fail closed)"
-                        ),
-                        caps         = caps,
-                        action_sm    = action_sm,
-                        event_type   = EVT_APPROVAL_DENIED,
-                        event_payload = {"reason": "no_gate"},
-                    )
-                decision = self._approval_gate.request(ApprovalRequest(
-                    description  = approval_description or code_preview,
-                    subject      = subject,
-                    capabilities = caps,
-                    code_preview = code_preview,
-                    execution_id = execution_id,
-                ))
-                if decision is not ApprovalDecision.APPROVED:
-                    return self._deny(
-                        execution_id = execution_id,
-                        origin       = origin,
-                        code_preview = code_preview,
-                        rule         = "approval:denied",
-                        ename        = "ApprovalDenied",
-                        evalue       = "human approval denied",
-                        caps         = caps,
-                        action_sm    = action_sm,
-                        event_type   = EVT_APPROVAL_DENIED,
-                        event_payload = {"reason": "denied"},
-                    )
-
-            # ── 1c. Cancellation (audit #83): a cancelled session never
-            # starts new work.
-            if cancel_event is not None and cancel_event.is_set():
-                self._record(
+        # ── 1. Authorization (capability broker) ─────────────────────────
+        if origin == ORIGIN_AGENT and self._broker is not None and caps:
+            try:
+                self._require_all(caps, subject)
+            except CapabilityViolation as exc:
+                denial = self._deny(
                     execution_id = execution_id,
                     origin       = origin,
-                    allowed      = True,
                     code_preview = code_preview,
-                    capabilities = caps,
-                    action_id    = action.action_id if action else None,
-                    had_error    = True,
+                    rule         = "capability:" + exc.name,
+                    ename        = "CapabilityViolation",
+                    evalue       = str(exc),
+                    caps         = caps,
+                    action_sm    = action_sm,
+                    event_type   = EVT_CAPABILITY_DENIED,
+                    event_payload = {"capability": exc.name, "subject": exc.subject},
                 )
-                self._emit("EXECUTION_CANCELLED", execution_id,
-                           action_id=action.action_id if action else None)
-                return CellOutput(
-                    error=CellError(
-                        ename  = "KernelInterrupted",
-                        evalue = "execution cancelled before it started",
-                    ),
+                return _TxContext(
+                    allowed            = False,
+                    execution_id       = execution_id,
+                    sequence           = execution_seq,
+                    code_preview       = code_preview,
+                    caps               = caps,
+                    declared_effects   = declared_effects,
+                    action_sm          = action_sm,
+                    attrs              = attrs,
+                    denial_output      = denial,
+                    denial_error_tuple = ("error", f"CapabilityViolation: {str(exc)}"),
+                )
+
+        # ── 1b. Human approval (audit #90) — fail closed ─────────────────
+        if origin == ORIGIN_AGENT and CAP_HUMAN_APPROVAL in caps:
+            if self._approval_gate is None:
+                denial = self._deny(
                     execution_id = execution_id,
+                    origin       = origin,
+                    code_preview = code_preview,
+                    rule         = "approval:no_gate",
+                    ename        = "ApprovalDenied",
+                    evalue       = "execution requires human.approval but no ApprovalGate is installed (fail closed)",
+                    caps         = caps,
+                    action_sm    = action_sm,
+                    event_type   = EVT_APPROVAL_DENIED,
+                    event_payload = {"reason": "no_gate"},
+                )
+                return _TxContext(
+                    allowed            = False,
+                    execution_id       = execution_id,
+                    sequence           = execution_seq,
+                    code_preview       = code_preview,
+                    caps               = caps,
+                    declared_effects   = declared_effects,
+                    action_sm          = action_sm,
+                    attrs              = attrs,
+                    denial_output      = denial,
+                    denial_error_tuple = ("error", "ApprovalDenied: no ApprovalGate installed"),
+                )
+            decision = self._approval_gate.request(ApprovalRequest(
+                description  = approval_description or code_preview,
+                subject      = subject,
+                capabilities = caps,
+                code_preview = code_preview,
+                execution_id = execution_id,
+            ))
+            if decision is not ApprovalDecision.APPROVED:
+                denial = self._deny(
+                    execution_id = execution_id,
+                    origin       = origin,
+                    code_preview = code_preview,
+                    rule         = "approval:denied",
+                    ename        = "ApprovalDenied",
+                    evalue       = "human approval denied",
+                    caps         = caps,
+                    action_sm    = action_sm,
+                    event_type   = EVT_APPROVAL_DENIED,
+                    event_payload = {"reason": "denied"},
+                )
+                return _TxContext(
+                    allowed            = False,
+                    execution_id       = execution_id,
+                    sequence           = execution_seq,
+                    code_preview       = code_preview,
+                    caps               = caps,
+                    declared_effects   = declared_effects,
+                    action_sm          = action_sm,
+                    attrs              = attrs,
+                    denial_output      = denial,
+                    denial_error_tuple = ("error", "ApprovalDenied: human approval denied"),
                 )
 
-            # ── 2. Policy (allowlist) ─────────────────────────────────────
-            if origin == ORIGIN_AGENT and self._allowlist is not None:
-                try:
-                    self._allowlist.check(code)
-                except AllowListViolation as exc:
-                    return self._deny(
-                        execution_id = execution_id,
-                        origin       = origin,
-                        code_preview = code_preview,
-                        rule         = exc.rule,
-                        ename        = "AllowListViolation",
-                        evalue       = str(exc),
-                        caps         = caps,
-                        action_sm    = action_sm,
-                        event_type   = EVT_POLICY_BLOCKED,
-                        event_payload = {"rule": exc.rule},
-                    )
-
-            # ── 3. Effects: declare BEFORE execution (audit #92) ─────────
-            if self._effect_ledger is not None:
-                self._effect_ledger.declare(execution_id, declared_effects)
-
-            # ── 4. Execution ─────────────────────────────────────────────
-            if action_sm is not None:
-                action_sm.transition(ActionStatus.QUEUED, reason="queued")
-                action_sm.transition(ActionStatus.RUNNING, reason="running")
-            self._emit(EVT_EXECUTION_STARTED, execution_id,
+        # ── 1c. Cancellation ─────────────────────────────────────────────
+        if cancel_event is not None and getattr(cancel_event, "is_set", lambda: False)():
+            self._record(
+                execution_id = execution_id,
+                sequence     = execution_seq,
+                origin       = origin,
+                allowed      = True,
+                code_preview = code_preview,
+                capabilities = caps,
+                action_id    = action.action_id if action else None,
+                had_error    = True,
+            )
+            self._emit("EXECUTION_CANCELLED", execution_id,
                        action_id=action.action_id if action else None)
-            start  = time.monotonic()
+            denial = CellOutput(
+                error        = CellError(ename="KernelInterrupted", evalue="execution cancelled before start"),
+                execution_id = execution_id,
+            )
+            return _TxContext(
+                allowed            = False,
+                execution_id       = execution_id,
+                sequence           = execution_seq,
+                code_preview       = code_preview,
+                caps               = caps,
+                declared_effects   = declared_effects,
+                action_sm          = action_sm,
+                attrs              = attrs,
+                denial_output      = denial,
+                denial_error_tuple = ("error", "KernelInterrupted: execution cancelled before start"),
+            )
+
+        # ── 2. Policy (allowlist) ─────────────────────────────────────────
+        if origin == ORIGIN_AGENT and self._allowlist is not None:
             try:
-                # Cancellation is passed only to executors that support it
-                # (capability detection keeps third-party Executors working).
+                self._allowlist.check(code)
+            except AllowListViolation as exc:
+                denial = self._deny(
+                    execution_id = execution_id,
+                    origin       = origin,
+                    code_preview = code_preview,
+                    rule         = exc.rule,
+                    ename        = "AllowListViolation",
+                    evalue       = str(exc),
+                    caps         = caps,
+                    action_sm    = action_sm,
+                    event_type   = EVT_POLICY_BLOCKED,
+                    event_payload = {"rule": exc.rule},
+                )
+                return _TxContext(
+                    allowed            = False,
+                    execution_id       = execution_id,
+                    sequence           = execution_seq,
+                    code_preview       = code_preview,
+                    caps               = caps,
+                    declared_effects   = declared_effects,
+                    action_sm          = action_sm,
+                    attrs              = attrs,
+                    denial_output      = denial,
+                    denial_error_tuple = ("error", f"AllowListViolation: {str(exc)}"),
+                )
+
+        # ── 3. Effects: declare BEFORE execution ─────────────────────────
+        if self._effect_ledger is not None:
+            self._effect_ledger.declare(execution_id, declared_effects)
+
+        # ── 4. State transition to running ───────────────────────────────
+        if action_sm is not None:
+            action_sm.transition(ActionStatus.QUEUED, reason="queued")
+            action_sm.transition(ActionStatus.RUNNING, reason="running")
+        self._emit(EVT_EXECUTION_STARTED, execution_id,
+                   action_id=action.action_id if action else None)
+
+        return _TxContext(
+            allowed          = True,
+            execution_id     = execution_id,
+            sequence         = execution_seq,
+            code_preview     = code_preview,
+            caps             = caps,
+            declared_effects = declared_effects,
+            action_sm        = action_sm,
+            attrs            = attrs,
+        )
+
+    def _finalize_transaction(
+        self,
+        tx:        _TxContext,
+        start:     float,
+        had_error: bool,
+        origin:    str,
+        action_id: Optional[str],
+    ) -> float:
+        dur_ms = (time.monotonic() - start) * 1000
+
+        # 1. Observe side effects (resilient)
+        if self._effect_ledger is not None:
+            try:
+                violations = self._effect_ledger.observe(tx.execution_id)
+                if violations:
+                    paths = sorted(p for v in violations for p in v.observed)
+                    self._emit(EVT_EFFECT_VIOLATION, tx.execution_id,
+                               action_id=action_id, undeclared_paths=paths)
+            except Exception as exc:
+                log.warning("Effect observation error", error=str(exc))
+
+        # 2. Transition action state machine to terminal state (resilient)
+        if tx.action_sm is not None:
+            try:
+                tx.action_sm.transition(
+                    ActionStatus.SUCCESS if not had_error else ActionStatus.FAILURE,
+                    reason="execution " + ("ok" if not had_error else "error"),
+                )
+            except Exception as exc:
+                log.warning("Action state machine transition error", error=str(exc))
+
+        # 3. Record audit trail (resilient)
+        try:
+            self._record(
+                execution_id = tx.execution_id,
+                sequence     = tx.sequence,
+                origin       = origin,
+                allowed      = True,
+                code_preview = tx.code_preview,
+                capabilities = tx.caps,
+                action_id    = action_id,
+                effects      = tx.declared_effects,
+                duration_ms  = dur_ms,
+                had_error    = had_error,
+            )
+        except Exception as exc:
+            log.warning("Audit record error", error=str(exc))
+
+        # 4. Emit terminal event (guaranteed)
+        self._emit(EVT_EXECUTION_COMPLETED, tx.execution_id,
+                   action_id=action_id, had_error=had_error, duration_ms=round(dur_ms, 2))
+        return dur_ms
+
+    def execute(
+        self,
+        code:                 str,
+        timeout:              float = 120.0,
+        silent:               bool  = False,
+        origin:               str   = ORIGIN_AGENT,
+        capabilities:         Optional[frozenset[str]] = None,
+        subject:              str   = "",
+        action:               Optional[Action] = None,
+        effects:              Optional[frozenset[str]] = None,
+        approval_description: str   = "",
+        cancel_event:         Optional[object] = None,
+    ) -> CellOutput:
+        """
+        Execute code through the authorization + policy boundary.
+        """
+        tx = self._prepare_transaction(
+            code=code, origin=origin, capabilities=capabilities, subject=subject,
+            action=action, effects=effects, approval_description=approval_description,
+            cancel_event=cancel_event, silent=silent,
+        )
+        if not tx.allowed:
+            return tx.denial_output
+
+        action_id = action.action_id if action else None
+
+        with self._tracer.span("execution.attempt", tx.attrs):
+            start     = time.monotonic()
+            had_error = False
+            try:
                 exec_kwargs = {}
                 if cancel_event is not None and self._supports_cancel():
                     exec_kwargs["cancel_event"] = cancel_event
                 output = self._kernel.execute(
                     code, timeout=timeout, silent=silent, **exec_kwargs
                 )
+                output.execution_id = tx.execution_id
+                if origin == ORIGIN_AGENT:
+                    output = self._redact_output(output)
+                had_error = output.has_error
+                return output
             except Exception:
-                if action_sm is not None:
-                    action_sm.transition(ActionStatus.FAILURE,
-                                         reason="kernel raised")
+                had_error = True
                 raise
             finally:
-                dur_ms = (time.monotonic() - start) * 1000
-            # Correlate the output with its execution (audit #78)
-            output.execution_id = execution_id
-
-            # Audit #68: scrub agent-origin outputs BEFORE they reach the
-            # LLM, notebook, or event store.
-            if origin == ORIGIN_AGENT:
-                output = self._redact_output(output)
-
-            # ── 5. Effects: observe AFTER execution (audit #93) ──────────
-            if self._effect_ledger is not None:
-                violations = self._effect_ledger.observe(execution_id)
-                if violations:
-                    paths = sorted(
-                        p for v in violations for p in v.observed
-                    )
-                    self._emit(EVT_EFFECT_VIOLATION, execution_id,
-                               action_id=action.action_id if action else None,
-                               undeclared_paths=paths)
-                    log.warning(
-                        "Undeclared effects detected",
-                        execution_id = execution_id,
-                        paths        = paths,
-                    )
-
-            # ── 6. Audit ─────────────────────────────────────────────────
-            if action_sm is not None:
-                action_sm.transition(
-                    ActionStatus.SUCCESS if not output.has_error
-                    else ActionStatus.FAILURE,
-                    reason="cell " + ("ok" if not output.has_error else "error"),
-                )
-            self._record(
-                execution_id = execution_id,
-                origin       = origin,
-                allowed      = True,
-                code_preview = code_preview,
-                capabilities = caps,
-                action_id    = action.action_id if action else None,
-                effects      = declared_effects,
-                duration_ms  = dur_ms,
-                had_error    = output.has_error,
-            )
-            self._emit(EVT_EXECUTION_COMPLETED, execution_id,
-                       action_id=action.action_id if action else None,
-                       had_error=output.has_error, duration_ms=round(dur_ms, 2))
-            return output
+                self._finalize_transaction(tx, start, had_error, origin, action_id)
 
     def execute_silent(
         self,
@@ -487,144 +570,22 @@ class ExecutionEngine:
         """
         Stream execution chunks through the full authorization + policy boundary (K-001).
 
-        Enforces identical governance to execute(): capability authorization,
-        human approval, pre-execution cancellation, allowlist inspection,
-        effect observation, action state transitions, event stream emission,
-        audit record logging, and output redaction with guaranteed try/finally
-        lifecycle completion.
+        Guarantees complete lifecycle parity with execute(): capability check,
+        approval gate, allowlist inspection, effect declaration/observation,
+        and guaranteed finally lifecycle completion.
         """
-        execution_id     = self._next_execution_id()
-        code_preview     = self._redact(code[:80].replace("\n", " "))
-        caps             = (
-            self._default_capabilities if capabilities is None
-            else frozenset(capabilities)
+        tx = self._prepare_transaction(
+            code=code, origin=origin, capabilities=capabilities, subject=subject,
+            action=action, effects=effects, approval_description=approval_description,
+            cancel_event=cancel_event, silent=False,
         )
-        declared_effects = frozenset(effects or ())
-        action_sm        = ActionStateMachine(action) if action is not None else None
-        if action_sm is not None:
-            action_sm.transition(ActionStatus.AUTHORIZING, reason="engine authorization")
-
-        code_hash = hashlib.sha256(code.encode("utf-8")).hexdigest()[:16]
-        self._record_provenance(
-            execution_id = execution_id,
-            origin       = origin,
-            code_hash    = code_hash,
-        )
-        self._emit(EVT_EXECUTION_REQUESTED, execution_id, origin=origin,
-                   code_hash=code_hash,
-                   action_id=action.action_id if action else None,
-                   capabilities=sorted(caps) if caps else [])
-
-        # ── 1. Authorization (capability broker) ─────────────────────────
-        if origin == ORIGIN_AGENT and self._broker is not None and caps:
-            try:
-                self._require_all(caps, subject)
-            except CapabilityViolation as exc:
-                self._deny(
-                    execution_id = execution_id,
-                    origin       = origin,
-                    code_preview = code_preview,
-                    rule         = "capability:" + exc.name,
-                    ename        = "CapabilityViolation",
-                    evalue       = str(exc),
-                    caps         = caps,
-                    action_sm    = action_sm,
-                    event_type   = EVT_CAPABILITY_DENIED,
-                    event_payload = {"capability": exc.name, "subject": exc.subject},
-                )
-                yield ("error", f"CapabilityViolation: {str(exc)}")
-                return
-
-        # ── 1b. Human approval (audit #90) — fail closed ─────────────────
-        if origin == ORIGIN_AGENT and CAP_HUMAN_APPROVAL in caps:
-            if self._approval_gate is None:
-                self._deny(
-                    execution_id = execution_id,
-                    origin       = origin,
-                    code_preview = code_preview,
-                    rule         = "approval:no_gate",
-                    ename        = "ApprovalDenied",
-                    evalue       = "execution requires human.approval but no ApprovalGate is installed (fail closed)",
-                    caps         = caps,
-                    action_sm    = action_sm,
-                    event_type   = EVT_APPROVAL_DENIED,
-                    event_payload = {"reason": "no_gate"},
-                )
-                yield ("error", "ApprovalDenied: no ApprovalGate installed")
-                return
-            decision = self._approval_gate.request(ApprovalRequest(
-                description  = approval_description or code_preview,
-                subject      = subject,
-                capabilities = caps,
-                code_preview = code_preview,
-                execution_id = execution_id,
-            ))
-            if decision is not ApprovalDecision.APPROVED:
-                self._deny(
-                    execution_id = execution_id,
-                    origin       = origin,
-                    code_preview = code_preview,
-                    rule         = "approval:denied",
-                    ename        = "ApprovalDenied",
-                    evalue       = "human approval denied",
-                    caps         = caps,
-                    action_sm    = action_sm,
-                    event_type   = EVT_APPROVAL_DENIED,
-                    event_payload = {"reason": "denied"},
-                )
-                yield ("error", "ApprovalDenied: human approval denied")
-                return
-
-        # ── 1c. Cancellation ─────────────────────────────────────────────
-        if cancel_event is not None and getattr(cancel_event, "is_set", lambda: False)():
-            self._record(
-                execution_id = execution_id,
-                origin       = origin,
-                allowed      = True,
-                code_preview = code_preview,
-                capabilities = caps,
-                action_id    = action.action_id if action else None,
-                had_error    = True,
-            )
-            self._emit("EXECUTION_CANCELLED", execution_id,
-                       action_id=action.action_id if action else None)
-            yield ("error", "KernelInterrupted: execution cancelled before start")
+        if not tx.allowed:
+            yield tx.denial_error_tuple
             return
 
-        # ── 2. Policy (allowlist) ─────────────────────────────────────────
-        if origin == ORIGIN_AGENT and self._allowlist is not None:
-            try:
-                self._allowlist.check(code)
-            except AllowListViolation as exc:
-                self._deny(
-                    execution_id = execution_id,
-                    origin       = origin,
-                    code_preview = code_preview,
-                    rule         = exc.rule,
-                    ename        = "AllowListViolation",
-                    evalue       = str(exc),
-                    caps         = caps,
-                    action_sm    = action_sm,
-                    event_type   = EVT_POLICY_BLOCKED,
-                    event_payload = {"rule": exc.rule},
-                )
-                yield ("error", f"AllowListViolation: {str(exc)}")
-                return
-
-        # ── 3. Effects: declare BEFORE execution (audit #92) ─────────────
-        if self._effect_ledger is not None:
-            self._effect_ledger.declare(execution_id, declared_effects)
-
-        # ── 4. Execution ─────────────────────────────────────────────────
-        if action_sm is not None:
-            action_sm.transition(ActionStatus.QUEUED, reason="queued")
-            action_sm.transition(ActionStatus.RUNNING, reason="running")
-        self._emit(EVT_EXECUTION_STARTED, execution_id,
-                   action_id=action.action_id if action else None)
-
+        action_id = action.action_id if action else None
         start     = time.monotonic()
         had_error = False
-        completed = False
 
         try:
             if hasattr(self._kernel, "stream_execute"):
@@ -639,7 +600,7 @@ class ExecutionEngine:
                 if cancel_event is not None and self._supports_cancel():
                     exec_kwargs["cancel_event"] = cancel_event
                 out = self._kernel.execute(code, timeout=timeout, silent=False, **exec_kwargs)
-                out.execution_id = execution_id
+                out.execution_id = tx.execution_id
                 if origin == ORIGIN_AGENT:
                     out = self._redact_output(out)
                 had_error = out.has_error
@@ -649,46 +610,11 @@ class ExecutionEngine:
                     yield ("stderr", out.stderr)
                 if out.has_error:
                     yield ("error", f"{out.error.ename}: {out.error.evalue}")
-            completed = True
         except Exception as exc:
             had_error = True
-            if action_sm is not None:
-                action_sm.transition(ActionStatus.FAILURE, reason="streaming raised")
             yield ("error", f"StreamExecutionError: {str(exc)}")
         finally:
-            dur_ms = (time.monotonic() - start) * 1000
-
-            # Observe side effects
-            if self._effect_ledger is not None:
-                violations = self._effect_ledger.observe(execution_id)
-                if violations:
-                    paths = sorted(p for v in violations for p in v.observed)
-                    self._emit(EVT_EFFECT_VIOLATION, execution_id,
-                               action_id=action.action_id if action else None,
-                               undeclared_paths=paths)
-
-            # Transition action state machine to terminal state
-            if action_sm is not None and completed:
-                action_sm.transition(
-                    ActionStatus.SUCCESS if not had_error else ActionStatus.FAILURE,
-                    reason="stream " + ("ok" if not had_error else "error"),
-                )
-
-            # Record audit trail and emit terminal event
-            self._record(
-                execution_id = execution_id,
-                origin       = origin,
-                allowed      = True,
-                code_preview = code_preview,
-                capabilities = caps,
-                action_id    = action.action_id if action else None,
-                effects      = declared_effects,
-                duration_ms  = dur_ms,
-                had_error    = had_error,
-            )
-            self._emit(EVT_EXECUTION_COMPLETED, execution_id,
-                       action_id=action.action_id if action else None,
-                       had_error=had_error, duration_ms=round(dur_ms, 2))
+            self._finalize_transaction(tx, start, had_error, origin, action_id)
 
     # ── Internals ──────────────────────────────────────────────────────────────
 
@@ -784,6 +710,7 @@ class ExecutionEngine:
         origin:       str,
         allowed:      bool,
         code_preview: str,
+        sequence:     Optional[int] = None,
         rule:         Optional[str] = None,
         capabilities: frozenset[str] = frozenset(),
         action_id:    Optional[str] = None,
@@ -791,9 +718,10 @@ class ExecutionEngine:
         duration_ms:  float = 0.0,
         had_error:    bool  = False,
     ) -> None:
+        seq = sequence if sequence is not None else self._sequence
         self._records.append(ExecutionRecord(
             execution_id = execution_id,
-            sequence     = self._sequence,
+            sequence     = seq,
             origin       = origin,
             allowed      = allowed,
             code_preview = code_preview,
