@@ -1,6 +1,6 @@
 # Kerno Formal Traceability Report & Verification Matrix
 
-**Document Version:** 1.1.0 · **Project:** Kerno (`Abdus2023/Kerno` v0.2.0)  
+**Document Version:** 1.2.0 · **Project:** Kerno (`Abdus2023/Kerno` v0.2.1-dev)  
 **Classification:** Living Audit & Invariant Traceability Matrix  
 **Standard:** Traceability between Security Findings, Architectural Invariants, Implementation Code, and Test Verification
 
@@ -10,7 +10,19 @@
 
 This traceability report provides an auditable, bidirectional map linking every requirement, security finding (`01`–`16`, `K-SEC-01`–`K-SEC-07`), architectural invariant (`K-001`–`K-010`), and formal runtime property (`P1`–`P10`) to the concrete code files, methods, and automated tests that enforce them.
 
-### Master Verification Gate Status
+### 1.1 Execution Surface & Governance Matrix
+
+| Execution Sink | Caller Reachability | Policy Check | Capability Check | Approval Check | Budget Cap | Secret Redact | Effect Observe | Audit Logging |
+|---|---|---|---|---|---|---|---|---|
+| **`ExecutionEngine.execute()`** | Agent Direct | ✅ AllowList | ✅ Broker (K-008) | ✅ ApprovalGate | ✅ BudgetedExecutor | ✅ Longest-First | ✅ EffectLedger | ✅ Monotonic Record |
+| **`ExecutionEngine.stream_execute()`** | Agent Direct | ✅ AllowList | ✅ Broker (K-008) | ✅ ApprovalGate | ✅ BudgetedExecutor | ✅ Stream Redact | ✅ EffectLedger | ✅ Monotonic Record |
+| **`KernelRuntime.execute()`** | Internal Backend | Governed via Engine | Governed via Engine | Governed via Engine | Governed via Engine | Governed via Engine | Governed via Engine | Governed via Engine |
+| **`KernelRuntime.stream_execute()`**| Internal Backend | Governed via Engine | Governed via Engine | Governed via Engine | Governed via Engine | Governed via Engine | Governed via Engine | Governed via Engine |
+| **`RemoteWorker.submit()`** | Distributed Node | ✅ Server Engine | ✅ Server Engine | ✅ Server Engine | ✅ Server Engine | ✅ Longest-First | ✅ Server Engine | ✅ Correlated ID |
+| **`DockerExecutor`** | Jail Backend | Governed via Engine | Governed via Engine | Governed via Engine | cgroups (CPU/RAM/PIDs)| Governed via Engine | Read-Only Mounts | Container Records |
+| **`Skill bootstrap`** | Infrastructure | ORIGIN_RUNTIME | Trusted System | Trusted System | N/A | N/A | N/A | ✅ Registry Hashes |
+
+### 1.2 Master Verification Gate Status
 
 | Gate Level | Verification Target | Enforcing Mechanism | Status |
 |---|---|---|---|

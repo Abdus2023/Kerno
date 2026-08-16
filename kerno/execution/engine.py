@@ -461,62 +461,219 @@ class ExecutionEngine:
 
     def stream_execute(
         self,
-        code:         str,
-        timeout:      float = 300.0,
-        origin:       str   = ORIGIN_AGENT,
-        capabilities: Optional[frozenset[str]] = None,
-        subject:      str   = "",
-        cancel_event: Optional[object] = None,
+        code:                 str,
+        timeout:              float = 300.0,
+        origin:               str   = ORIGIN_AGENT,
+        capabilities:         Optional[frozenset[str]] = None,
+        subject:              str   = "",
+        action:               Optional[Action] = None,
+        effects:              Optional[frozenset[str]] = None,
+        approval_description: str   = "",
+        cancel_event:         Optional[object] = None,
     ):
         """
-        Stream execution chunks through the authorization + policy boundary (K-001).
+        Stream execution chunks through the full authorization + policy boundary (K-001).
 
-        Applies capability broker authorization and allowlist checks BEFORE
-        streaming execution. Violations yield an error tuple and return
-        without touching the kernel.
+        Enforces identical governance to execute(): capability authorization,
+        human approval, pre-execution cancellation, allowlist inspection,
+        effect observation, action state transitions, event stream emission,
+        audit record logging, and output redaction with guaranteed try/finally
+        lifecycle completion.
         """
-        execution_id = self._next_execution_id()
-        caps = self._default_capabilities if capabilities is None else frozenset(capabilities)
+        execution_id     = self._next_execution_id()
+        code_preview     = self._redact(code[:80].replace("\n", " "))
+        caps             = (
+            self._default_capabilities if capabilities is None
+            else frozenset(capabilities)
+        )
+        declared_effects = frozenset(effects or ())
+        action_sm        = ActionStateMachine(action) if action is not None else None
+        if action_sm is not None:
+            action_sm.transition(ActionStatus.AUTHORIZING, reason="engine authorization")
 
-        if origin == ORIGIN_AGENT:
-            # 1. Capability Authorization (K-008)
-            if self._broker is not None:
-                try:
-                    for name in caps:
-                        self._broker.require(name, subject=subject)
-                except CapabilityViolation as cv:
-                    self._emit(EVT_CAPABILITY_DENIED, execution_id, error=str(cv))
-                    yield ("error", f"CapabilityViolation: {str(cv)}")
-                    return
+        code_hash = hashlib.sha256(code.encode("utf-8")).hexdigest()[:16]
+        self._record_provenance(
+            execution_id = execution_id,
+            origin       = origin,
+            code_hash    = code_hash,
+        )
+        self._emit(EVT_EXECUTION_REQUESTED, execution_id, origin=origin,
+                   code_hash=code_hash,
+                   action_id=action.action_id if action else None,
+                   capabilities=sorted(caps) if caps else [])
 
-            # 2. AllowList Policy Check
-            if self._allowlist is not None:
-                try:
-                    self._allowlist.check(code)
-                except AllowListViolation as alv:
-                    self._emit(EVT_POLICY_BLOCKED, execution_id, error=str(alv))
-                    yield ("error", f"AllowListViolation: {str(alv)}")
-                    return
+        # ── 1. Authorization (capability broker) ─────────────────────────
+        if origin == ORIGIN_AGENT and self._broker is not None and caps:
+            try:
+                self._require_all(caps, subject)
+            except CapabilityViolation as exc:
+                self._deny(
+                    execution_id = execution_id,
+                    origin       = origin,
+                    code_preview = code_preview,
+                    rule         = "capability:" + exc.name,
+                    ename        = "CapabilityViolation",
+                    evalue       = str(exc),
+                    caps         = caps,
+                    action_sm    = action_sm,
+                    event_type   = EVT_CAPABILITY_DENIED,
+                    event_payload = {"capability": exc.name, "subject": exc.subject},
+                )
+                yield ("error", f"CapabilityViolation: {str(exc)}")
+                return
 
-        # 3. Kernel Streaming Delegation
-        if hasattr(self._kernel, "stream_execute"):
-            self._emit(EVT_EXECUTION_STARTED, execution_id)
-            for kind, text in self._kernel.stream_execute(code, timeout=timeout, cancel_event=cancel_event):
-                if origin == ORIGIN_AGENT and self._redact_outputs:
-                    text = self._redact(text)
-                yield (kind, text)
-            self._emit(EVT_EXECUTION_COMPLETED, execution_id)
-        else:
-            out = self.execute(
-                code, timeout=timeout, origin=origin, capabilities=capabilities,
-                subject=subject, cancel_event=cancel_event,
+        # ── 1b. Human approval (audit #90) — fail closed ─────────────────
+        if origin == ORIGIN_AGENT and CAP_HUMAN_APPROVAL in caps:
+            if self._approval_gate is None:
+                self._deny(
+                    execution_id = execution_id,
+                    origin       = origin,
+                    code_preview = code_preview,
+                    rule         = "approval:no_gate",
+                    ename        = "ApprovalDenied",
+                    evalue       = "execution requires human.approval but no ApprovalGate is installed (fail closed)",
+                    caps         = caps,
+                    action_sm    = action_sm,
+                    event_type   = EVT_APPROVAL_DENIED,
+                    event_payload = {"reason": "no_gate"},
+                )
+                yield ("error", "ApprovalDenied: no ApprovalGate installed")
+                return
+            decision = self._approval_gate.request(ApprovalRequest(
+                description  = approval_description or code_preview,
+                subject      = subject,
+                capabilities = caps,
+                code_preview = code_preview,
+                execution_id = execution_id,
+            ))
+            if decision is not ApprovalDecision.APPROVED:
+                self._deny(
+                    execution_id = execution_id,
+                    origin       = origin,
+                    code_preview = code_preview,
+                    rule         = "approval:denied",
+                    ename        = "ApprovalDenied",
+                    evalue       = "human approval denied",
+                    caps         = caps,
+                    action_sm    = action_sm,
+                    event_type   = EVT_APPROVAL_DENIED,
+                    event_payload = {"reason": "denied"},
+                )
+                yield ("error", "ApprovalDenied: human approval denied")
+                return
+
+        # ── 1c. Cancellation ─────────────────────────────────────────────
+        if cancel_event is not None and getattr(cancel_event, "is_set", lambda: False)():
+            self._record(
+                execution_id = execution_id,
+                origin       = origin,
+                allowed      = True,
+                code_preview = code_preview,
+                capabilities = caps,
+                action_id    = action.action_id if action else None,
+                had_error    = True,
             )
-            if out.stdout:
-                yield ("stdout", out.stdout)
-            if out.stderr:
-                yield ("stderr", out.stderr)
-            if out.has_error:
-                yield ("error", f"{out.error.ename}: {out.error.evalue}")
+            self._emit("EXECUTION_CANCELLED", execution_id,
+                       action_id=action.action_id if action else None)
+            yield ("error", "KernelInterrupted: execution cancelled before start")
+            return
+
+        # ── 2. Policy (allowlist) ─────────────────────────────────────────
+        if origin == ORIGIN_AGENT and self._allowlist is not None:
+            try:
+                self._allowlist.check(code)
+            except AllowListViolation as exc:
+                self._deny(
+                    execution_id = execution_id,
+                    origin       = origin,
+                    code_preview = code_preview,
+                    rule         = exc.rule,
+                    ename        = "AllowListViolation",
+                    evalue       = str(exc),
+                    caps         = caps,
+                    action_sm    = action_sm,
+                    event_type   = EVT_POLICY_BLOCKED,
+                    event_payload = {"rule": exc.rule},
+                )
+                yield ("error", f"AllowListViolation: {str(exc)}")
+                return
+
+        # ── 3. Effects: declare BEFORE execution (audit #92) ─────────────
+        if self._effect_ledger is not None:
+            self._effect_ledger.declare(execution_id, declared_effects)
+
+        # ── 4. Execution ─────────────────────────────────────────────────
+        if action_sm is not None:
+            action_sm.transition(ActionStatus.QUEUED, reason="queued")
+            action_sm.transition(ActionStatus.RUNNING, reason="running")
+        self._emit(EVT_EXECUTION_STARTED, execution_id,
+                   action_id=action.action_id if action else None)
+
+        start     = time.monotonic()
+        had_error = False
+        completed = False
+
+        try:
+            if hasattr(self._kernel, "stream_execute"):
+                for kind, text in self._kernel.stream_execute(code, timeout=timeout, cancel_event=cancel_event):
+                    if kind == "error":
+                        had_error = True
+                    if origin == ORIGIN_AGENT and self._redact_outputs:
+                        text = self._redact(text)
+                    yield (kind, text)
+            else:
+                out = self.execute(
+                    code, timeout=timeout, origin=origin, capabilities=capabilities,
+                    subject=subject, cancel_event=cancel_event,
+                )
+                had_error = out.has_error
+                if out.stdout:
+                    yield ("stdout", out.stdout)
+                if out.stderr:
+                    yield ("stderr", out.stderr)
+                if out.has_error:
+                    yield ("error", f"{out.error.ename}: {out.error.evalue}")
+            completed = True
+        except Exception as exc:
+            had_error = True
+            if action_sm is not None:
+                action_sm.transition(ActionStatus.FAILURE, reason="streaming raised")
+            yield ("error", f"StreamExecutionError: {str(exc)}")
+            raise
+        finally:
+            dur_ms = (time.monotonic() - start) * 1000
+
+            # Observe side effects
+            if self._effect_ledger is not None:
+                violations = self._effect_ledger.observe(execution_id)
+                if violations:
+                    paths = sorted(p for v in violations for p in v.observed)
+                    self._emit(EVT_EFFECT_VIOLATION, execution_id,
+                               action_id=action.action_id if action else None,
+                               undeclared_paths=paths)
+
+            # Transition action state machine to terminal state
+            if action_sm is not None and completed:
+                action_sm.transition(
+                    ActionStatus.SUCCESS if not had_error else ActionStatus.FAILURE,
+                    reason="stream " + ("ok" if not had_error else "error"),
+                )
+
+            # Record audit trail and emit terminal event
+            self._record(
+                execution_id = execution_id,
+                origin       = origin,
+                allowed      = True,
+                code_preview = code_preview,
+                capabilities = caps,
+                action_id    = action.action_id if action else None,
+                effects      = declared_effects,
+                duration_ms  = dur_ms,
+                had_error    = had_error,
+            )
+            self._emit(EVT_EXECUTION_COMPLETED, execution_id,
+                       action_id=action.action_id if action else None,
+                       had_error=had_error, duration_ms=round(dur_ms, 2))
 
     # ── Internals ──────────────────────────────────────────────────────────────
 

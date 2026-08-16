@@ -546,6 +546,29 @@ class TestEngineStreamExecute:
         assert chunks[0][0] == "error"
         assert "CapabilityViolation" in chunks[0][1]
 
+    def test_stream_execute_human_approval_fail_closed(self):
+        # Human approval required without gate must fail closed
+        engine = ExecutionEngine(FakeKernel(), default_capabilities=frozenset({CAP_HUMAN_APPROVAL}))
+        chunks = list(engine.stream_execute("x = 1"))
+        assert len(chunks) == 1
+        assert chunks[0][0] == "error"
+        assert "ApprovalDenied" in chunks[0][1]
+
+    def test_stream_execute_guarantees_terminal_event_on_kernel_failure(self):
+        class ExplodingStreamKernel(FakeKernel):
+            def stream_execute(self, code, **kw):
+                raise RuntimeError("kernel crashed mid-stream")
+
+        engine = ExecutionEngine(ExplodingStreamKernel())
+        with pytest.raises(RuntimeError):
+            list(engine.stream_execute("x = 1"))
+
+        # Invariant P1 / K-005: EXECUTION_COMPLETED must still be emitted in finally
+        event_types = [e.event_type for e in engine.events]
+        assert "EXECUTION_STARTED" in event_types
+        assert "EXECUTION_COMPLETED" in event_types
+        assert event_types[-1] == "EXECUTION_COMPLETED"
+
 
 class TestAllowListHookEncapsulation:
     """The kernel hook encapsulates _original_import in a closure and deletes it from globals."""
@@ -556,3 +579,24 @@ class TestAllowListHookEncapsulation:
         assert "_kerno_install_import_hook()" in kcode
         assert "del _kerno_install_import_hook" in kcode
         assert "_original_import = _builtins.__import__\n" not in kcode
+
+
+class TestAdversarialCapabilityAcquisition:
+    """Probes against capability acquisition and dynamic import bypasses."""
+
+    def test_dynamic_imports_blocked_by_allowlist(self):
+        al = AllowList.data_analysis()
+
+        # Dynamic import attempts
+        bypasses = [
+            "__import__('os')",
+            "__import__('subprocess')",
+            "import importlib\nimportlib.import_module('os')",
+            "import ctypes\nctypes.CDLL(None)",
+            "import socket\ns = socket.socket()",
+            "import urllib.request\nurllib.request.urlopen('http://evil.com')",
+        ]
+
+        for code in bypasses:
+            with pytest.raises(AllowListViolation):
+                al.check(code)
