@@ -273,6 +273,17 @@ This traceability report provides an auditable, bidirectional map linking every 
 
 ---
 
+### Round 26: External Transport Governance & Production Gateway Enforcement
+* **Goal**: Close all external HTTP/WebSocket transport bypasses (`K-011`), eliminate client security downgrades (`K-012`), enforce transport governance parity (`K-013`), fix `os.path` dangerous prefix authorization, and harden production container profiles.
+* **Key Artifacts**:
+  * `kerno/server/app.py` & `openai_compat.py`: Enforced universal `_build_gateway_engine` across `/run`, `/stream`, and `/ws`, preventing client-controlled `security="none"` downgrades and registering cancellation tokens on all streaming paths.
+  * `kerno/security/allowlist.py`: Fixed `os.path` dangerous prefix authorization and filtered dangerous system modules in in-kernel import hooks.
+  * `docker-compose.prod.yml`: Set `KERNO_RUNTIME_MODE=production`, `KERNO_ENABLE_AUTH=true`, and private port exposure (`expose: 8001`).
+  * `Dockerfile.kerno`: Configured non-root execution user `kerno` (UID 1000).
+  * `docs/TRACEABILITY_REPORT.md`: Synchronized master traceability matrix and invariants `K-001`–`K-013`.
+
+---
+
 ## 3. Formal Invariants Traceability Matrix
 
 | Invariant ID | Formal Property Description | Enforcing Code Location | Verification Test File |
@@ -287,6 +298,9 @@ This traceability report provides an auditable, bidirectional map linking every 
 | **K-008** | Capabilities are granted explicitly, never inferred from syntax | `kerno/security/capabilities.py`, `kerno/skilltrust.py` | `tests/unit/test_capability_broker.py`, `test_skilltrust.py` |
 | **K-009** | Agents do not share mutable kernel state unless configured | `kerno/isolation.py` (`SharedMemory`), `kerno/bus.py` | `tests/behavioral/test_multi_agent_isolation.py` |
 | **K-010** | CI gates are reproducible via automated toolchain | `Makefile` (`ci`, `smoke`), `kerno doctor` | `tests/unit/test_doctor.py` |
+| **K-011** | Universal external execution governance (no raw kernel in /run, /stream, /ws) | `kerno/server/app.py`, `openai_compat.py` | `tests/unit/test_server_security.py` |
+| **K-012** | Server-controlled security policy (clients cannot downgrade security) | `kerno/server/app.py`, `openai_compat.py` | `tests/unit/test_server_security.py` |
+| **K-013** | Transport governance parity across all server execution modes | `kerno/server/app.py`, `openai_compat.py` | `tests/unit/test_server_security.py` |
 | **P1** | Completed execution cannot return to running | `kerno/invariants.py` (`check_terminal_events`) | `tests/unit/test_invariants.py` |
 | **P2** | Denied action cannot execute in kernel | `kerno/invariants.py` (`check_denied_never_started`) | `tests/unit/test_invariants.py` |
 | **P3/P10**| Exactly one terminal outcome, terminal state is final | `kerno/invariants.py` (`check_single_terminal_state`) | `tests/unit/test_invariants.py` |

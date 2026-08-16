@@ -37,7 +37,7 @@ PROFILES = {
 
 def make_server_engine(
     kernel:            object,
-    profile:           str = "permissive",
+    profile:           str = "data_analysis",
     capability_broker: Optional[CapabilityBroker] = None,
     budget:            Optional[ExecutionBudget] = None,
 ) -> object:
@@ -46,9 +46,9 @@ def make_server_engine(
 
     Args:
         kernel:            the acquired KernelRuntime (or any Executor)
-        profile:           allowlist profile: "none" (no policy — explicit
-                           opt-out), "permissive", "data_analysis",
-                           "read_only"
+        profile:           allowlist profile: "data_analysis" (default),
+                           "read_only", "permissive", or "none" (explicit
+                           trusted opt-out)
         capability_broker: CapabilityBroker for authorization (K-008)
         budget:            ExecutionBudget capping the session (audit #85)
 
@@ -57,7 +57,11 @@ def make_server_engine(
     """
     allowlist = None
     if profile != "none":
-        allowlist = PROFILES.get(profile, AllowList.permissive)()
+        if profile not in PROFILES:
+            raise ValueError(
+                f"Unknown security profile: {profile!r}. Available: {sorted(PROFILES.keys())}"
+            )
+        allowlist = PROFILES[profile]()
 
     engine = ExecutionEngine(
         kernel,

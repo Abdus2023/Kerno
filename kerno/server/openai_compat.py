@@ -58,7 +58,7 @@ def create_openai_app(
     model_name:        str  = "Kerno Kernel Agent",
     capability_broker: Optional[object] = None,
     budget:            Optional[object] = None,
-    default_security:  str  = "permissive",
+    default_security:  str  = "data_analysis",
 ) -> "FastAPI":
     """
     Create an OpenAI-compatible FastAPI application.
@@ -93,11 +93,16 @@ def create_openai_app(
     app.add_middleware(
         CORSMiddleware,
         allow_origins  = ["*"],
+        allow_credentials = False,
         allow_methods  = ["*"],
         allow_headers  = ["*"],
     )
 
-    # ── Health check (not OpenAI standard, but useful) ───────────────────────
+    # ── Health check ─────────────────────────────────────────────────────────
+
+    @app.get("/health/live")
+    async def health_live():
+        return {"status": "ok"}
 
     @app.get("/health")
     async def health():
@@ -168,12 +173,13 @@ def create_openai_app(
                 from kerno.server.security  import make_server_engine
 
                 bootstrap(kernel)
-                # K-001: never execute raw kernel code from the HTTP
-                # surface — wrap in the choke point.
+                # K-001 / K-012: client cannot downgrade below server policy
+                prof = getattr(request, "security", default_security) or default_security
+                if prof == "none":
+                    prof = default_security
                 engine = make_server_engine(
                     kernel,
-                    profile            = getattr(request, "security",
-                                                default_security),
+                    profile            = prof,
                     capability_broker  = capability_broker,
                     budget             = budget,
                 )
@@ -229,11 +235,13 @@ def create_openai_app(
 
         try:
             bootstrap(kernel)
-            # K-001: the streaming path also goes through the choke point.
+            # K-001 / K-012: client cannot downgrade below server policy
+            prof = getattr(request, "security", default_security) or default_security
+            if prof == "none":
+                prof = default_security
             engine = make_server_engine(
                 kernel,
-                profile            = getattr(request, "security",
-                                            default_security),
+                profile            = prof,
                 capability_broker  = capability_broker,
                 budget             = budget,
             )

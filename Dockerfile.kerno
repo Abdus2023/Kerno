@@ -17,8 +17,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 RUN pip install -e ".[all]"
 
-# Create data directories
-RUN mkdir -p /data /sessions
+# Create data directories and non-root user
+RUN mkdir -p /data /sessions \
+    && useradd -u 1000 -m -s /bin/bash kerno \
+    && chown -R kerno:kerno /data /sessions /app
+
+USER kerno
 
 # Health check endpoint comes from the kerno server
 EXPOSE 8001
