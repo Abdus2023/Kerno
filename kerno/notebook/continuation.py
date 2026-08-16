@@ -32,6 +32,7 @@ def load_notebook(
     stop_on_error: bool = False,
     timeout_per_cell: float = 120.0,
     verbose: bool  = False,
+    engine:  Optional[object] = None,
 ) -> tuple[list[Cell], str]:
     """
     Load a prior notebook into a kernel and return its execution history.
@@ -44,6 +45,11 @@ def load_notebook(
         stop_on_error:    If True, stop if any cell raises an error.
         timeout_per_cell: Per-cell execution timeout.
         verbose:          Print cell-by-cell progress.
+        engine:           Optional ExecutionEngine (K-001). When given,
+                          re-execution goes THROUGH the choke point so
+                          policy applies to the recorded cells; without
+                          it, raw re-execution is an explicit opt-in for
+                          trusted callers only.
 
     Returns:
         (cells, task): list of Cell objects + original task description
@@ -74,7 +80,12 @@ def load_notebook(
             if verbose:
                 print(f"  [load] Cell {i}: {code[:60].replace(chr(10), ' ')}")
 
-            output = kernel.execute(code, timeout=timeout_per_cell)
+            # K-001: re-execution goes through the choke point when an
+            # engine is provided (policy applies to recorded cells).
+            if engine is not None:
+                output = engine.execute(code, timeout=timeout_per_cell)
+            else:
+                output = kernel.execute(code, timeout=timeout_per_cell)
 
             if output.has_error:
                 if verbose:
@@ -115,15 +126,23 @@ def continue_from_notebook(
     """
     Load a prior notebook and continue the analysis from where it left off.
 
+    Delegates to kerno.session.resume_from_notebook, the SECURE path:
+    the recorded cells are re-executed on a fresh kernel THROUGH the
+    ExecutionEngine (policy re-applied, blocked cells stay blocked),
+    then the LLM continues. `re_execute` is accepted for backward
+    compatibility; state restoration through the engine is always on.
+
     Args:
         path:       Path to .ipynb file from a prior session
         llm:        LLM callable
         new_task:   Override the task (default: resume original task)
         loop:       Loop strategy for continuation
-        re_execute: Re-execute prior cells to restore state
+        re_execute: Accepted for backward compatibility (state is
+                    restored through the engine regardless)
         max_cells:  Max new cells to generate
         verbose:    Verbose output
-        loop_kwargs: Additional kwargs passed to the loop
+        loop_kwargs: Additional kwargs (allowlist, capability_broker,
+                    budget, cell_timeout, auto_restart, kernel_name)
 
     Returns:
         SessionResult
@@ -137,69 +156,17 @@ def continue_from_notebook(
                        "Please complete the regional breakdown and conclusions.",
         )
     """
-    from kerno.loop.reactive   import ReactiveLoop
-    from kerno.loop.reflect    import ReflectReviseLoop
-    from kerno.loop.plan_execute import PlanExecuteLoop
-    from kerno.skills.bootstrap import bootstrap
-    from kerno.types import SessionStatus
-    import uuid
+    from kerno.session import resume_from_notebook as _secure_resume
 
-    with KernelRuntime() as kernel:
-
-        # Bootstrap skills (same as a fresh session)
-        bootstrap(kernel)
-
-        if verbose:
-            print(f"Loading prior session: {path}")
-
-        # Load and optionally re-execute prior history
-        prior_cells, original_task = load_notebook(
-            path              = path,
-            kernel            = kernel,
-            re_execute        = re_execute,
-            verbose           = verbose,
-        )
-
-        task = new_task or (
-            f"Continue this analysis. Prior work has been loaded.\n"
-            f"Original task: {original_task}\n"
-            f"Resume from where the prior session ended."
-        )
-
-        if verbose:
-            print(f"Continuing with task: {task[:100]}")
-            print(f"Prior state: {kernel.namespace[:200]}")
-
-        # Create loop and inject prior history
-        loop_cls = {
-            "reactive": ReactiveLoop,
-            "reflect":  ReflectReviseLoop,
-            "plan":     PlanExecuteLoop,
-        }.get(loop, ReactiveLoop)
-
-        agent = loop_cls(
-            kernel    = kernel,
-            llm       = llm,
-            max_cells = max_cells,
-            verbose   = verbose,
-            **loop_kwargs,
-        )
-
-        # Inject prior history so the LLM has context
-        agent._history  = prior_cells[-20:]   # Last 20 cells as context
-        agent._task     = task
-
-        # Build a summary of what was done before
-        if prior_cells:
-            agent._summary = (
-                f"Prior session loaded: {len(prior_cells)} cells executed. "
-                f"Kernel state restored. "
-                f"Original task: {original_task}"
-            )
-
-        result = agent.run(task)
-
-    return result
+    return _secure_resume(
+        path,
+        llm,
+        new_task       = new_task,
+        loop           = loop,
+        max_cells      = max_cells,
+        verbose        = verbose,
+        **loop_kwargs,
+    )
 
 
 def _outputs_from_nb_cell(nb_cell) -> CellOutput:

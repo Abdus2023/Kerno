@@ -32,8 +32,9 @@ if HAS_FASTAPI:
         loop:          str  = "reactive"
         max_cells:     int  = 50
         memory:        bool = False
-        security:      str  = "none"
+        security:      str  = "permissive"   # "none" opts out entirely
         save_notebook: bool = False
+        budget_cells:  Optional[int] = None   # ExecutionBudget cap (audit #85)
 
     class RunResponse(BaseModel):
         session_id:     str
@@ -47,10 +48,12 @@ if HAS_FASTAPI:
 def create_app(
     llm,
     *,
-    skills_path:  Optional[str] = None,
-    memory_path:  str           = ".kerno/memory.json",
-    pool_size:    int           = 3,
-    cors_origins: list[str]     = ["*"],
+    skills_path:       Optional[str] = None,
+    memory_path:       str           = ".kerno/memory.json",
+    pool_size:         int           = 3,
+    cors_origins:      list[str]     = ["*"],
+    capability_broker: Optional[object] = None,
+    budget:            Optional[object] = None,
 ) -> "FastAPI":
     """
     Create and configure the FastAPI application.
@@ -61,6 +64,10 @@ def create_app(
         memory_path:  Path to memory store
         pool_size:    Number of warm kernels in the pool
         cors_origins: Allowed CORS origins
+        capability_broker: CapabilityBroker (K-008) applied to every
+                           request session
+        budget:       ExecutionBudget (audit #85) applied to every
+                      request session
 
     Returns:
         Configured FastAPI app
@@ -327,14 +334,32 @@ def _execute_task(
     request,
     session_id: str,
     memory,
+    capability_broker: Optional[object] = None,
+    budget:            Optional[object] = None,
 ) -> SessionResult:
-    """Execute a task synchronously in a kernel."""
+    """Execute a task synchronously in a kernel — through the choke point."""
     from kerno.loop.factory       import make_reactive, make_reflect
     from kerno.skills.bootstrap   import bootstrap
     from kerno.interfaces         import AgentState
+    from kerno.server.security    import make_server_engine
     import time
 
     bootstrap(kernel)
+
+    # K-001: the pipeline never sees the raw kernel — only the
+    # policy-wrapped engine (allowlist + broker + budget). A per-request
+    # budget_cells caps the session even when no server-wide budget set.
+    req_budget = None
+    req_cells = getattr(request, "budget_cells", None)
+    if req_cells:
+        from kerno.execution.budget import ExecutionBudget
+        req_budget = ExecutionBudget(max_executions=int(req_cells))
+    engine = make_server_engine(
+        kernel,
+        profile            = request.security,
+        capability_broker  = capability_broker,
+        budget             = budget or req_budget,
+    )
 
     factory = {
         "reactive": make_reactive,
@@ -342,7 +367,7 @@ def _execute_task(
     }.get(request.loop, make_reactive)
 
     pipeline = factory(
-        kernel    = kernel,
+        kernel    = engine,
         llm       = llm,
         memory    = memory,
         max_cells = request.max_cells,

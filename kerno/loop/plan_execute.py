@@ -116,7 +116,14 @@ class PlanExecuteLoop(BaseLoop):
 
     # ── Override run() to inject planning phase ────────────────────────────────
 
-    def run(self, task: str) -> SessionResult:
+    def run(
+        self,
+        task:            str,
+        *,
+        initial_history: Optional[list] = None,
+        initial_summary: str = "",
+        cancel_token:    Optional[object] = None,
+    ) -> SessionResult:
         """
         Extended run: plan first, then delegate to base execution loop.
         """
@@ -129,7 +136,12 @@ class PlanExecuteLoop(BaseLoop):
             self._print_plan()
 
         # Phase 2: Execute against plan
-        return super().run(task)
+        return super().run(
+            task,
+            initial_history = initial_history,
+            initial_summary = initial_summary,
+            cancel_token    = cancel_token,
+        )
 
     # ── Core loop implementation ───────────────────────────────────────────────
 

@@ -148,6 +148,7 @@ class DebateLoop:
         n_rounds:    int          = 2,
         cell_timeout: float       = 120.0,
         verbose:     bool         = False,
+        cancel_token: Optional[object] = None,   # cancellation (audit #83)
     ):
         self.kernel       = kernel
         self.proposer     = proposer
@@ -157,6 +158,7 @@ class DebateLoop:
         self.n_rounds     = n_rounds
         self.cell_timeout = cell_timeout
         self.verbose      = verbose
+        self.cancel_token = cancel_token
 
         self._recovery   = RecoveryStrategy()
         self._rounds:    list[DebateRound] = []
@@ -188,19 +190,32 @@ class DebateLoop:
             print("╚{}╝".format("═" * 54))
 
         # Debate rounds
+        status = SessionStatus.MAX_CELLS
         for round_num in range(1, self.n_rounds + 1):
+            # Audit #83: cancellation stops the debate between rounds.
+            if (
+                self.cancel_token is not None
+                and self.cancel_token.is_set()
+            ):
+                status = SessionStatus.INTERRUPTED
+                break
             if self.verbose:
                 print("\n── Round {}/{} ──────────────────────────".format(round_num, self.n_rounds))
 
             debate_round = self._run_round(task, round_num)
             self._rounds.append(debate_round)
 
-        # Judge's verdict
-        if self.verbose:
-            print("\n── Judge's Verdict ────────────────────────────────")
+        # Judge's verdict (skipped entirely when cancelled)
+        cancelled = (
+            self.cancel_token is not None and self.cancel_token.is_set()
+        )
+        if not cancelled:
+            if self.verbose:
+                print("\n── Judge's Verdict ────────────────────────────────")
 
-        verdict_cells = self._run_judge(task)
-        self._all_cells.extend(verdict_cells)
+            verdict_cells = self._run_judge(task)
+            self._all_cells.extend(verdict_cells)
+            status = SessionStatus.COMPLETE
 
         # Extract verdict from namespace
         verdict_text = self.kernel.execute_silent(
@@ -216,7 +231,7 @@ class DebateLoop:
         return SessionResult(
             session_id      = self._session_id,
             task            = task,
-            status          = SessionStatus.COMPLETE,
+            status          = status,
             cells           = self._all_cells,
             final_namespace = self.kernel.namespace,
             summary         = summary,
@@ -301,7 +316,12 @@ class DebateLoop:
             Message(role="user",   content="Render your verdict now."),
         ]
         code   = self.judge(messages)
-        output = self.kernel.execute(code, timeout=self.cell_timeout)
+        exec_kwargs = {}
+        if self.cancel_token is not None:
+            exec_kwargs["cancel_event"] = self.cancel_token
+        output = self.kernel.execute(
+            code, timeout=self.cell_timeout, **exec_kwargs
+        )
 
         cell = Cell(
             code     = code,
@@ -355,7 +375,12 @@ class DebateLoop:
         ]
 
         code   = llm(messages)
-        output = self.kernel.execute(code, timeout=self.cell_timeout)
+        exec_kwargs = {}
+        if self.cancel_token is not None:
+            exec_kwargs["cancel_event"] = self.cancel_token
+        output = self.kernel.execute(
+            code, timeout=self.cell_timeout, **exec_kwargs
+        )
 
         if output.has_error:
             hint, _  = self._recovery.suggest(output.error)
@@ -365,7 +390,9 @@ class DebateLoop:
                 content = "Error: {}\nWrite a corrected cell.".format(hint)
             ))
             code   = llm(messages)
-            output = self.kernel.execute(code, timeout=self.cell_timeout)
+            output = self.kernel.execute(
+                code, timeout=self.cell_timeout, **exec_kwargs
+            )
 
         cell = Cell(
             code     = code,

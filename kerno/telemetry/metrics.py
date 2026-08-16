@@ -98,6 +98,32 @@ class Metrics:
         self.histogram("kerno.session.errors",      error_count, tags=tags)
         self.histogram("kerno.session.recoveries",  recovery_count, tags=tags)
 
+    def record_execution(
+        self,
+        *,
+        allowed:    bool,
+        origin:     str   = "agent",
+        rule:       str   = "",
+        session_id: str   = "",
+    ) -> None:
+        """
+        Audit #80: one event source → multiple projections. The engine's
+        execution records project into counters: attempts, policy
+        blocks, capability denials, approvals.
+        """
+        tags = {"origin": origin, "session_id": session_id}
+        self.counter("kerno.executions.attempts", tags=tags)
+        if not allowed:
+            if rule and rule.startswith("capability:"):
+                self.counter("kerno.executions.capability_denied",
+                             tags={**tags, "rule": rule})
+            elif rule and rule.startswith("approval:"):
+                self.counter("kerno.executions.approval_denied",
+                             tags={**tags, "rule": rule})
+            else:
+                self.counter("kerno.executions.blocked",
+                             tags={**tags, "rule": rule})
+
     def record_kernel_memory(self, memory_mb: float, kernel_id: str = "") -> None:
         self.gauge(
             "kerno.kernel.memory_mb",

@@ -74,10 +74,73 @@ _SKILL_MODULES = [
 ]
 
 
+# ── Optional-dependency awareness (audit #16) ────────────────────────────────
+# Each skill module's kernel-side requirements. Modules whose deps are
+# missing in the kernel are SKIPPED with a warning (never crash the
+# session) — a lean `pip install kerno` without kerno[data] still runs.
+_SKILL_DEPS: dict[str, list[str]] = {
+    "anomaly_skills": ['IPython', 'matplotlib', 'numpy', 'pandas', 'scipy', 'sklearn'],
+    "api_skills": ['IPython', 'pandas', 'requests'],
+    "artifacts_skills": ['IPython', 'pandas'],
+    "data_skills": ['IPython', 'joblib', 'numpy', 'pandas'],
+    "docs_skills": ['IPython', 'docx', 'pandas', 'pdfplumber'],
+    "experiment_skills": ['IPython', 'numpy', 'pandas', 'scipy'],
+    "export_skills": ['IPython', 'pandas'],
+    "features_skills": ['IPython', 'matplotlib', 'numpy', 'pandas', 'sklearn'],
+    "filesystem_skills": ['IPython', 'pandas'],
+    "finance_skills": ['IPython', 'numpy', 'pandas'],
+    "graph_skills": ['IPython', 'matplotlib', 'networkx', 'pandas'],
+    "introspect_skills": ['IPython', 'numpy', 'pandas'],
+    "llm_tools_skills": ['IPython', 'numpy', 'openai', 'pandas'],
+    "meta_skills": ['IPython'],
+    "ml_skills": ['IPython', 'matplotlib', 'numpy', 'pandas', 'sklearn'],
+    "network_skills": ['IPython', 'matplotlib', 'networkx', 'pandas'],
+    "nlp_skills": ['IPython', 'nltk', 'numpy', 'pandas', 'sklearn'],
+    "optimization_skills": ['IPython', 'numpy', 'pandas', 'scipy'],
+    "quality_skills": ['IPython', 'numpy', 'pandas'],
+    "report_skills": ['IPython', 'numpy', 'pandas'],
+    "simulation_skills": ['IPython', 'matplotlib', 'numpy', 'pandas', 'scipy'],
+    "sql_skills": ['IPython', 'pandas', 'sqlalchemy'],
+    "stats_skills": ['IPython', 'numpy', 'pandas', 'scipy'],
+    "synth_skills": ['IPython', 'numpy', 'pandas'],
+    "synthetic_skills": ['IPython', 'numpy', 'pandas', 'sklearn'],
+    "text_skills": ['IPython', 'matplotlib', 'numpy', 'pandas', 'sklearn'],
+    "timeseries_skills": ['IPython', 'matplotlib', 'numpy', 'pandas', 'statsmodels'],
+    "viz_skills": ['IPython', 'matplotlib', 'numpy', 'pandas'],
+    "web_skills": ['IPython', 'pandas'],
+}
+
+
+def _probe_missing_deps(kernel: KernelRuntime, deps: list[str]) -> set[str]:
+    """Ask the KERNEL which of `deps` are importable (one batched cell).
+
+    Returns the set of missing modules. On probe failure, assume none
+    are missing so existing behavior is preserved.
+    """
+    deps = sorted({d for d in deps if d})
+    if not deps:
+        return set()
+    code = (
+        "import importlib.util as _ilu\n"
+        f"_reqs = {deps!r}\n"
+        "print([_m for _m in _reqs if _ilu.find_spec(_m) is None])\n"
+    )
+    out = kernel.execute(code, silent=True, timeout=30)
+    if out.has_error:
+        return set()
+    try:
+        import ast
+        missing = ast.literal_eval(out.stdout.strip())
+        return set(missing) if isinstance(missing, list) else set()
+    except (ValueError, SyntaxError):
+        return set()
+
+
 def bootstrap(
     kernel:  KernelRuntime,
     include: list[str] = None,
     exclude: list[str] = None,
+    skip_missing_deps: bool = True,
 ) -> SkillRegistry:
     """
     Load the full default skill set into a kernel.
@@ -92,11 +155,38 @@ def bootstrap(
     """
     registry = SkillRegistry()
 
-    for name, code_fn in _SKILL_MODULES:
-        if include and name not in include:
-            continue
-        if exclude and name in exclude:
-            continue
+    modules = [
+        (name, code_fn) for name, code_fn in _SKILL_MODULES
+        if (not include or name in include)
+        and (not exclude or name not in exclude)
+    ]
+
+    if skip_missing_deps:
+        missing = _probe_missing_deps(kernel, [
+            dep for name, _ in modules for dep in _SKILL_DEPS.get(name, [])
+        ])
+        if missing:
+            skipped = sorted({
+                name for name, _ in modules
+                if any(dep in missing for dep in _SKILL_DEPS.get(name, []))
+            })
+            if skipped:
+                import warnings
+                warnings.warn(
+                    "[kerno] Skipping skill modules (missing optional deps "
+                    "{}): {}".format(
+                        sorted(missing),
+                        ", ".join(skipped),
+                    )
+                )
+            modules = [
+                (name, code_fn) for name, code_fn in modules
+                if not any(
+                    dep in missing for dep in _SKILL_DEPS.get(name, [])
+                )
+            ]
+
+    for name, code_fn in modules:
         registry.load_code(kernel, code_fn(), name, protect=True)
 
     return registry

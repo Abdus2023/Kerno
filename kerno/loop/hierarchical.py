@@ -154,6 +154,7 @@ class HierarchicalLoop:
         max_cells_per_subtask: int   = 15,
         cell_timeout:    float       = 120.0,
         verbose:         bool        = False,
+        cancel_token:   Optional[object] = None,   # cancellation (audit #83)
     ):
         self.kernel                   = kernel
         self.planner_llm              = planner_llm
@@ -161,6 +162,7 @@ class HierarchicalLoop:
         self.max_cells_per_subtask    = max_cells_per_subtask
         self.cell_timeout             = cell_timeout
         self.verbose                  = verbose
+        self.cancel_token             = cancel_token
 
         self._builder    = PromptBuilder()
         self._compressor = HistoryCompressor(executor_llm)  # Compress with cheap model
@@ -181,6 +183,7 @@ class HierarchicalLoop:
         """
         session_id = str(uuid.uuid4())
         started_at = time.time()
+        status     = SessionStatus.COMPLETE   # completed unless cancelled
 
         # ── Phase 1: Decompose ─────────────────────────────────────────────
         if self.verbose:
@@ -195,6 +198,13 @@ class HierarchicalLoop:
 
         # ── Phase 2: Execute subtasks ──────────────────────────────────────
         for subtask in self._subtasks:
+            # Audit #83: cancellation stops the session between subtasks.
+            if (
+                self.cancel_token is not None
+                and self.cancel_token.is_set()
+            ):
+                status = SessionStatus.INTERRUPTED
+                break
 
             # Check dependencies
             unmet = [
@@ -221,34 +231,43 @@ class HierarchicalLoop:
             if subtask.unexpected_findings and self.verbose:
                 print(f"  ⚡ Unexpected: {subtask.unexpected_findings}")
 
-        # ── Phase 3: Synthesize ────────────────────────────────────────────
-        if self.verbose:
-            print("\n╔══ PLANNER: Synthesizing results ═══════════╗")
-
-        synthesis = self._synthesize(task)
-
-        # Add synthesis as a final cell
-        synthesis_output = self.kernel.execute(
-            f'from IPython.display import display, Markdown\n'
-            f'display(Markdown("""\n## Final Synthesis\n{synthesis}\n"""))',
-            timeout=10,
+        # ── Phase 3: Synthesize (skipped entirely when cancelled) ────────
+        cancelled = (
+            self.cancel_token is not None and self.cancel_token.is_set()
         )
-        self._all_cells.append(Cell(
-            code     = f"# TASK_COMPLETE: see synthesis above\n# {synthesis[:200]}",
-            output   = synthesis_output,
-            cell_num = len(self._all_cells) + 1,
-            author   = "planner",
-            reasoning= synthesis,
-        ))
+        if cancelled:
+            status = SessionStatus.INTERRUPTED
 
-        if self.verbose:
-            print(synthesis[:300])
-            print("╚═══════════════════════════════════════════╝")
+        if not cancelled:
+            if self.verbose:
+                print("\n╔══ PLANNER: Synthesizing results ═══════════╗")
+
+            synthesis = self._synthesize(task)
+        else:
+            synthesis = "Session interrupted by cancellation."
+
+            # Add synthesis as a final cell
+            synthesis_output = self.kernel.execute(
+                f'from IPython.display import display, Markdown\n'
+                f'display(Markdown("""\n## Final Synthesis\n{synthesis}\n"""))',
+                timeout=10,
+            )
+            self._all_cells.append(Cell(
+                code     = f"# TASK_COMPLETE: see synthesis above\n# {synthesis[:200]}",
+                output   = synthesis_output,
+                cell_num = len(self._all_cells) + 1,
+                author   = "planner",
+                reasoning= synthesis,
+            ))
+
+            if self.verbose:
+                print(synthesis[:300])
+                print("╚═══════════════════════════════════════════╝")
 
         return SessionResult(
             session_id      = session_id,
             task            = task,
-            status          = SessionStatus.COMPLETE,
+            status          = status,
             cells           = self._all_cells,
             final_namespace = self.kernel.namespace,
             summary         = synthesis,
@@ -342,8 +361,20 @@ class HierarchicalLoop:
                 self._pending_hint = None
 
             # Generate code
+            # Audit #83: a cancelled session never starts a new cell.
+            if (
+                self.cancel_token is not None
+                and self.cancel_token.is_set()
+            ):
+                break
+
             code   = self.executor_llm(messages)
-            output = self.kernel.execute(code, timeout=self.cell_timeout)
+            exec_kwargs = {}
+            if self.cancel_token is not None:
+                exec_kwargs["cancel_event"] = self.cancel_token
+            output = self.kernel.execute(
+                code, timeout=self.cell_timeout, **exec_kwargs
+            )
 
             if self.verbose:
                 status_icon = "✗" if output.has_error else "→"

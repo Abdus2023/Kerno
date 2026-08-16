@@ -49,6 +49,7 @@ class BaseLoop(ABC):
         memory:                 Optional[MemoryStore] = None,
         plugins:                Optional[PluginRegistry] = None,
         verbose:                bool  = False,
+        auto_restart:           bool  = False,
     ):
         self.kernel                  = kernel
         self.llm                     = llm
@@ -59,6 +60,7 @@ class BaseLoop(ABC):
         self.memory                  = memory
         self.plugins                 = plugins
         self.verbose                 = verbose
+        self.auto_restart            = auto_restart
 
         self._builder    = PromptBuilder()
         self._compressor = HistoryCompressor(llm)
@@ -75,17 +77,41 @@ class BaseLoop(ABC):
 
     # ── Public API ─────────────────────────────────────────────────────────────
 
-    def run(self, task: str) -> SessionResult:
+    def run(
+        self,
+        task:            str,
+        *,
+        initial_history: Optional[list] = None,
+        initial_summary: str = "",
+        cancel_token:    Optional[object] = None,
+        capture:         Optional[object] = None,
+    ) -> SessionResult:
+        """
+        Run the agent loop on a task.
+
+        Args:
+            task:             Natural language task description
+            initial_history:  Prior executed cells to continue from
+                              (session resume, audit #35/#36)
+            initial_summary:  Prior context summary to seed the prompt
+            cancel_token:     CancellationToken (audit #83) — checked
+                              before every cell; the session ends with
+                              INTERRUPTED status when cancelled.
+            capture:          CapturePoint (audit #59, K-007) — after
+                              each completed cell, a host-side checkpoint
+                              is recorded bound to the engine's event
+                              sequence + kernel generation (no kernel code).
+        """
         self._task               = task
-        self._history            = []
-        self._summary            = ""
+        self._history            = list(initial_history) if initial_history else []
+        self._summary            = initial_summary or ""
         self._consecutive_errors = 0
         started_at               = time.time()
 
         Path("_checkpoints").mkdir(exist_ok=True)
 
-        # Inject relevant memories into context
-        if self.memory:
+        # Inject relevant memories into context (unless resuming with one)
+        if self.memory and not self._summary:
             self._summary = self._retrieve_relevant_memories(task)
 
         ctx  = tracer.start_trace(f"session.{self._loop_type}")
@@ -111,7 +137,27 @@ class BaseLoop(ABC):
             },
             trace_id = ctx.trace_id,
         ):
-            for cell_num in range(1, self.max_cells + 1):
+            for cell_num in range(
+                len(self._history) + 1,
+                len(self._history) + self.max_cells + 1,
+            ):
+
+                # Audit #83: cancellation is checked before ANY new work
+                # (kernel health check, LLM generation, execution).
+                if cancel_token is not None and cancel_token.is_set():
+                    status = SessionStatus.INTERRUPTED
+                    break
+
+                # Kernel health first (K-004): the prompt builder reads the
+                # namespace, so a dead kernel must be handled BEFORE the
+                # LLM is asked to generate anything.
+                if not self.kernel.is_alive:
+                    if self.auto_restart and self._restore_kernel():
+                        if self.verbose:
+                            print("  ♻️ Kernel died — restarted, state restored")
+                        continue
+                    status = SessionStatus.KERNEL_DIED
+                    break
 
                 try:
                     code = self._next_cell(cell_num)
@@ -122,10 +168,6 @@ class BaseLoop(ABC):
 
                 if self.verbose:
                     self._print_cell(cell_num, code)
-
-                if not self.kernel.is_alive:
-                    status = SessionStatus.KERNEL_DIED
-                    break
 
                 if self.plugins:
                     try:
@@ -157,7 +199,12 @@ class BaseLoop(ABC):
                         self._on_error(cell)
                         continue
 
-                output = self.kernel.execute(code, timeout=self.cell_timeout)
+                exec_kwargs = {}
+                if cancel_token is not None:
+                    exec_kwargs["cancel_event"] = cancel_token
+                output = self.kernel.execute(
+                    code, timeout=self.cell_timeout, **exec_kwargs
+                )
 
                 if self.verbose:
                     self._print_output(output)
@@ -206,7 +253,15 @@ class BaseLoop(ABC):
                     )
                     self._history = self._history[-10:]
 
-                if COMPLETE_SIGNAL in code:
+                # K-007: host-side checkpoint capture after a SUCCESSFUL
+                # cell (the event sequence is at the completed position).
+                if capture is not None and not output.has_error:
+                    capture.after_cell(cell_num)
+
+                # A completion marker only counts if the cell actually
+                # SUCCEEDED — a policy-blocked or errored cell containing
+                # "# TASK_COMPLETE" must not end the session as COMPLETE.
+                if not output.has_error and COMPLETE_SIGNAL in code:
                     status = SessionStatus.COMPLETE
                     break
 
@@ -215,14 +270,15 @@ class BaseLoop(ABC):
             task            = task,
             status          = status,
             cells           = list(self._history),
-            final_namespace = self.kernel.namespace,
+            final_namespace = self._safe_namespace(),
             summary         = self._summary,
             started_at      = started_at,
             ended_at        = time.time(),
         )
 
-        # Store session result in memory
-        if self.memory and status == SessionStatus.COMPLETE:
+        # Store session result in memory — NB: `is not None`, never `or`:
+        # stores define __len__ so an EMPTY store is falsy.
+        if self.memory is not None and status == SessionStatus.COMPLETE:
             self.memory.store_session_result(
                 session_id = self._session_id,
                 task       = task,
@@ -333,6 +389,40 @@ class BaseLoop(ABC):
         return "\n".join(lines)
 
     # ── Internals ─────────────────────────────────────────────────────────────
+
+    def _safe_namespace(self) -> str:
+        """Namespace snapshot that never raises (dead kernel → \"{}\")."""
+        try:
+            return self.kernel.namespace
+        except Exception:
+            return "{}"
+
+    def _restore_kernel(self) -> bool:
+        """
+        K-004: restart the kernel and re-execute history to restore state.
+
+        The kernel is restarted through the underlying runtime (generation
+        increments), then every recorded cell is re-executed — trusted
+        infrastructure re-running already-vetted code. Returns True if the
+        kernel is alive afterwards.
+        """
+        raw = getattr(self.kernel, "raw_kernel", None) or self.kernel
+        try:
+            raw.restart()
+        except Exception as exc:
+            log.error("Kernel restart failed", error=str(exc))
+            return False
+        for cell in self._history:
+            # Only successful cells contributed (trusted) state. Errored
+            # cells — including policy-blocked ones — are never re-run.
+            if cell.output.has_error:
+                continue
+            try:
+                raw.execute(cell.code, timeout=self.cell_timeout)
+            except Exception as exc:
+                log.error("State restoration failed", error=str(exc))
+                return False
+        return self.kernel.is_alive
 
     def _auto_checkpoint(self) -> None:
         code = """

@@ -109,6 +109,8 @@ class AllowList:
                 (r'\beval\s*\(',         "eval_call"),
                 (r'\bexec\s*\(',         "exec_call"),
                 (r'__import__\s*\(\s*[\'"]subprocess', "subprocess_import"),
+                (r'^\s*%\w+',               "ipython_magic"),
+                (r'^\s*!\S',                "shell_escape"),
             ],
         )
 
@@ -132,12 +134,31 @@ class AllowList:
             ],
             blocked_patterns=[
                 (r'\bsubprocess\b',             "subprocess"),
-                (r'\burllib\.request\b',        "urllib_request"),
+                (r'\burllib\b',                 "urllib"),
                 (r'\brequests\b',               "requests_module"),
                 (r'\bsocket\b',                 "socket"),
-                (r'\bopen\s*\(.*[\'"]w[\'"]',   "file_write"),
+                (r'\bopen\s*\(.*[\'"]w[\'"]',    "file_write"),
                 (r'\bos\.remove\b',             "os_remove"),
+                (r'\bos\.environ\b',            "env_access"),
                 (r'\bshutil\b',                 "shutil"),
+                (r'\bimportlib\b',              "importlib"),
+                # pathlib is allowlisted, so block its write methods explicitly
+                (r'\.write_text\s*\(',          "path_write"),
+                (r'\.write_bytes\s*\(',         "path_write"),
+                (r'\.unlink\s*\(',              "path_delete"),
+                # pandas/matplotlib write methods (allowed modules, blocked effects)
+                (r'\.to_csv\s*\(',              "pandas_write"),
+                (r'\.to_parquet\s*\(',          "pandas_write"),
+                (r'\.to_excel\s*\(',            "pandas_write"),
+                (r'\.savefig\s*\(',             "plot_write"),
+                # URL-backed data loading (allowed libraries reaching the network)
+                (r'\.read_csv\s*\(\s*[\'"]https?://',  "url_load"),
+                (r'\.read_json\s*\(\s*[\'"]https?://',  "url_load"),
+                (r'\.read_excel\s*\(\s*[\'"]https?://', "url_load"),
+                # IPython line magics / shell escapes — these bypass
+                # Python-syntax checks entirely (audit hardening)
+                (r'^\s*%\w+',               "ipython_magic"),
+                (r'^\s*!\S',                "shell_escape"),
             ],
             blocked_builtins=["eval", "exec", "compile", "__import__"],
         )
@@ -155,15 +176,30 @@ class AllowList:
                 "collections", "typing",
             ],
             blocked_patterns=[
-                (r'\bopen\s*\(',        "file_open"),
-                (r'\bsubprocess\b',     "subprocess"),
-                (r'\burllib\b',         "urllib"),
-                (r'\brequests\b',       "requests"),
-                (r'\bsocket\b',         "socket"),
-                (r'\bos\.',             "os_module"),
-                (r'\bshutil\b',         "shutil"),
-                (r'\bpickle\b',         "pickle"),
-                (r'\bimportlib\b',      "importlib"),
+                (r'\bopen\s*\(',         "file_open"),
+                (r'\bsubprocess\b',      "subprocess"),
+                (r'\burllib\b',          "urllib"),
+                (r'\brequests\b',        "requests"),
+                (r'\bsocket\b',          "socket"),
+                (r'\bos\.',              "os_module"),
+                (r'\bshutil\b',          "shutil"),
+                (r'\bpickle\b',          "pickle"),
+                (r'\bimportlib\b',       "importlib"),
+                # write methods on otherwise-allowlisted objects
+                (r'\.write_text\s*\(',   "path_write"),
+                (r'\.write_bytes\s*\(',  "path_write"),
+                (r'\.unlink\s*\(',       "path_delete"),
+                (r'\.to_csv\s*\(',       "pandas_write"),
+                (r'\.to_parquet\s*\(',   "pandas_write"),
+                (r'\.to_excel\s*\(',     "pandas_write"),
+                (r'\.savefig\s*\(',      "plot_write"),
+                # URL-backed data loading
+                (r'\.read_csv\s*\(\s*[\'"]https?://',  "url_load"),
+                (r'\.read_json\s*\(\s*[\'"]https?://',  "url_load"),
+                (r'\.read_excel\s*\(\s*[\'"]https?://', "url_load"),
+                # IPython line magics / shell escapes
+                (r'^\s*%\w+',               "ipython_magic"),
+                (r'^\s*!\S',                "shell_escape"),
             ],
             blocked_builtins=["eval", "exec", "compile", "__import__", "open"],
         )
@@ -172,6 +208,17 @@ class AllowList:
         """
         Generate Python code to enforce module restrictions
         inside the kernel at import time.
+
+        Design constraints (this hook runs inside the patched kernel):
+          - It must NEVER import anything through the patched __import__
+            (the previous implementation re-entered itself via
+            `import importlib.util` and wedged the kernel with infinite
+            recursion).
+          - Stdlib modules are always allowed, via sys.stdlib_module_names.
+          - Modules already loaded in sys.modules are allowed: the
+            capability was already granted when they were first imported,
+            and ipykernel internals lazily re-import them.
+          - Everything else must be explicitly allowlisted.
         """
         if not self.allowed_modules:
             return ""
@@ -182,26 +229,28 @@ import sys as _sys
 import builtins as _builtins
 
 _KERNO_ALLOWED_MODULES = {allowed_repr}
-
 _original_import = _builtins.__import__
 
 def _restricted_import(name, *args, **kwargs):
+    # Relative imports (level > 0) are internal machinery — always allow.
+    # Note: CPython passes `level` positionally as the 5th argument.
+    level = kwargs.get('level', 0) or (args[3] if len(args) > 3 else 0)
+    if level > 0:
+        return _original_import(name, *args, **kwargs)
     top_level = name.split('.')[0]
-    if top_level not in _KERNO_ALLOWED_MODULES:
-        # Allow stdlib modules not explicitly listed
-        try:
-            import importlib.util as _ilu
-            _spec = _ilu.find_spec(name)
-            if _spec and _spec.origin and 'site-packages' not in (_spec.origin or ''):
-                return _original_import(name, *args, **kwargs)
-        except (ImportError, ValueError):
-            pass
-        raise ImportError(
-            f"Module '{{name}}' is not in the kerno allowlist. "
-            f"Available: {{_KERNO_ALLOWED_MODULES[:5]}}..."
-        )
-    return _original_import(name, *args, **kwargs)
+    if top_level in _KERNO_ALLOWED_MODULES:
+        return _original_import(name, *args, **kwargs)
+    # Already-loaded modules: capability was granted at first import,
+    # and the kernel itself lazily re-imports internals.
+    if top_level in _sys.modules:
+        return _original_import(name, *args, **kwargs)
+    # Standard library: always available.
+    if top_level in getattr(_sys, 'stdlib_module_names', ()):
+        return _original_import(name, *args, **kwargs)
+    raise ImportError(
+        f"Module '{{name}}' is not in the kerno allowlist. "
+        f"Available: {{_KERNO_ALLOWED_MODULES[:5]}}..."
+    )
 
 _builtins.__import__ = _restricted_import
-print("✓ Module allowlist active")
 """

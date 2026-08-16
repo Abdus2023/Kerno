@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Optional
 
 from kerno.config        import KernoConfig
+from kerno.execution.budget import ExecutionBudget
 from kerno.memory.simple import SimpleMemoryStore
 from kerno.security.allowlist import AllowList
 from kerno.types         import LLMCallable, SessionResult
@@ -54,6 +55,19 @@ def run_with_config(
             "read_only":     AllowList.read_only,
         }.get(cfg.security.profile, AllowList.permissive)()
 
+    # Build the execution budget from config (audit #85)
+    budget = None
+    if (
+        cfg.runtime.budget_executions is not None
+        or cfg.runtime.budget_wall_time is not None
+        or cfg.runtime.budget_output is not None
+    ):
+        budget = ExecutionBudget(
+            max_executions   = cfg.runtime.budget_executions,
+            max_wall_time    = cfg.runtime.budget_wall_time,
+            max_output_bytes = cfg.runtime.budget_output,
+        )
+
     return run(
         task                 = task,
         llm                  = llm,
@@ -65,8 +79,13 @@ def run_with_config(
         load_default_skills  = True,
         memory               = memory,
         allowlist            = allowlist,
+        budget               = budget,
         save_notebook        = cfg.output.save_notebook,
         notebook_dir         = cfg.output.notebook_dir,
         comm_handlers        = comm_handlers,
+        auto_restart         = cfg.runtime.auto_restart,
+        model_name           = cfg.runtime.model_name,
+        isolation            = cfg.runtime.isolation,
+        mode                 = cfg.runtime.mode,
         verbose              = cfg.output.verbose,
     )

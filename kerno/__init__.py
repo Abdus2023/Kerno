@@ -22,6 +22,43 @@ from kerno.interfaces import (
     CellTransformer, OutputFormatter, Skill,
 )
 
+# ── Execution engine (the single execution choke point, K-001) ────────────────
+
+from kerno.execution import (
+    ExecutionEngine, ExecutionRecord, ExecutionEvent,
+    ORIGIN_AGENT, ORIGIN_RUNTIME,
+    EVT_EXECUTION_REQUESTED, EVT_CAPABILITY_DENIED, EVT_POLICY_BLOCKED,
+    EVT_EXECUTION_STARTED, EVT_EXECUTION_COMPLETED,
+)
+
+# ── Capability broker (authorization layer, K-008) ────────────────────────────
+
+from kerno.security.capabilities import (
+    Capability, CapabilityBroker, CapabilityGrant, CapabilityViolation,
+    CAP_KERNEL_EXECUTE, CAP_FILESYSTEM_READ, CAP_FILESYSTEM_WRITE,
+    CAP_NETWORK_CONNECT, CAP_PROCESS_SPAWN, CAP_PACKAGE_IMPORT,
+    CAP_NOTEBOOK_WRITE, CAP_ARTIFACT_CREATE, CAP_SECRET_READ,
+    CAP_DATAFRAME, CAP_HUMAN_APPROVAL,
+    PROFILE_READ_ONLY, PROFILE_DATA_ANALYSIS, PROFILE_RESEARCH,
+    PROFILE_TRUSTED, grant_profile,
+)
+
+# ── Secrets (dedicated secret management + redaction, audit #67/#68) ──────────
+
+from kerno.security.secrets import (
+    SecretBroker, SecretNotFound, SecretDenied, REDACTED,
+)
+
+# ── Execution modes, replay, and budgets ──────────────────────────────────────
+
+from kerno.execution.modes import (
+    ExecutionMode, DryRunExecutor, ReplayExecutor, replay_session,
+)
+from kerno.execution.budget import (
+    ExecutionBudget, BudgetExceeded, BudgetTracker, BudgetSnapshot,
+    BudgetedExecutor, BudgetAllocator, BudgetAllocationError,
+)
+
 # ── Pipeline composition ─────────────────────────────────────────────────────
 
 from kerno.pipeline import (
@@ -93,12 +130,17 @@ from kerno.loop.multi_agent    import (
 )
 from kerno.loop.debate         import DebateLoop
 
+# ── Kernel health state ───────────────────────────────────────────────────────
+
+from kerno.kernel.state import KernelRuntimeState
+
 # ── Session builder ──────────────────────────────────────────────────────────
 
 from kerno.compose import Session
 
 # ── LLM wrappers ─────────────────────────────────────────────────────────────
 
+from kerno.llm.brain import ScriptedBrain
 from kerno.llm.wrappers import (
     LoggedLLM, CachedLLM, RetryLLM,
     FallbackLLM, RateLimitedLLM,
@@ -218,7 +260,156 @@ from kerno.benchmark.report import BenchmarkReport
 
 # ── Provenance ───────────────────────────────────────────────────────────────
 
-from kerno.provenance import ProvenanceRecord
+from kerno.provenance import (
+    ProvenanceRecord, ProvenanceGraph, ProvenanceNode, ProvenanceEdge,
+    ProvenanceGraphError,
+    KIND_TASK, KIND_ACTION, KIND_CODE, KIND_EXECUTION, KIND_ARTIFACT,
+)
+
+# ── Layered memory (audit #62/#63) ──────────────────────────────────────────
+
+from kerno.memory.layered import LayeredMemory
+
+# ── Subprocess executor (audit #97) ──────────────────────────────────────────
+
+from kerno.subprocess_exec import SubprocessExecutor
+
+# ── Skill evolution + trust (audit #64/#65) ──────────────────────────────────
+
+from kerno.evolution_trust import EvolutionReviewer
+
+# ── Core runtime primitives: state + checkpoints ─────────────────────────────
+
+from kerno.core import (
+    StateLedger, StateTransition,
+    Checkpoint, CheckpointStore, CapturePoint,
+)
+
+# ── SessionResult ↔ AgentState bridge (audit #76) ───────────────────────────
+
+from kerno.bridge import (
+    result_to_state, state_to_result, state_history_len,
+)
+
+# ── Session resume (K-004) ───────────────────────────────────────────────────
+
+from kerno.session import (
+    resume_session, fork_session, resume_from_notebook,
+    session_to_dict, session_from_dict,
+    save_session, load_session,
+)
+
+# ── Cancellation (audit #83) ────────────────────────────────────────────────
+
+from kerno.cancel import CancellationToken
+
+# ── Task scheduler (audit #81/#82) ───────────────────────────────────────────
+
+from kerno.scheduler import (
+    TaskScheduler, ScheduledTask, TaskStatus,
+)
+
+# ── Distributed execution (audit #104) ──────────────────────────────────────
+
+from kerno.distributed import (
+    Worker, WorkerPool, DistributedExecutor, ExecutionRequest,
+)
+
+# ── Capability execution (audit #31/#48) ─────────────────────────────────────
+
+from kerno.capability_exec import (
+    CapabilityExecutor, CapabilityResult, CapabilityRecord,
+    CapabilityError, CAP_ARTIFACT_READ,
+)
+
+# ── Reproducibility manifests (audit #57) ────────────────────────────────────
+
+from kerno.reproducibility import (
+    EnvironmentSnapshot, ReproducibilityManifest,
+    build_manifest, save_manifest, export_lock, save_lock,
+    hash_text, hash_file,
+)
+
+# ── Action model + state machine (audit #45-#49, P10) ───────────────────────
+
+from kerno.action import (
+    Action, ActionKind, ActionStatus, ActionStateMachine,
+    Idempotency, RetryDecision, retry_policy,
+    InvalidTransition, TERMINAL_STATUSES,
+)
+
+# ── Content-addressed artifacts (audit #94/#95) ──────────────────────────────
+
+from kerno.artifacts import (
+    ArtifactRef, ArtifactStore, sha256_bytes,
+    MEDIA_TYPE_JSON, MEDIA_TYPE_IPYNB, MEDIA_TYPE_CSV,
+    MEDIA_TYPE_PLAIN, MEDIA_TYPE_BYTES,
+)
+
+# ── Effect ledger (audit #92/#93) ────────────────────────────────────────────
+
+from kerno.effects import (
+    EffectLedger, EffectViolation, WorkspaceObserver,
+    EFFECT_FILESYSTEM_WRITE, EFFECT_NETWORK_CONNECT, EFFECT_PROCESS_SPAWN,
+    EFFECTS_WRITE, EFFECTS_NONE,
+)
+
+# ── Human approval (audit #90) ───────────────────────────────────────────────
+
+from kerno.approval import (
+    ApprovalGate, ApprovalRequest, ApprovalDecision,
+    AutoApprovalGate, DenyByDefaultGate,
+)
+
+# ── Fault injection (audit #72) ─────────────────────────────────────────────
+
+from kerno.faults import FaultInjector, kill_kernel
+
+# ── Runtime invariants (audit #101, P1-P10) ──────────────────────────────────
+
+from kerno.invariants import (
+    InvariantViolation, verify,
+    check_terminal_events, check_denied_never_started,
+    check_single_terminal_state, check_artifact_provenance,
+    check_monotonic_sequence, check_attenuation, check_replay_llm_free,
+    check_generation_monotonic, check_session_recovered,
+)
+
+# ── Pluggable executors (audit #97/#104) ────────────────────────────────────
+
+from kerno.executors import (
+    make_executor, ScriptedExecutor, UnknownExecutorKind, EXECUTOR_KINDS,
+)
+
+# ── Agent message bus (Phase D) ─────────────────────────────────────────────
+
+from kerno.bus import (
+    BROADCAST, AgentMessage, AgentBus,
+)
+
+# ── Skill trust levels (audit #64/#65) ───────────────────────────────────────
+
+from kerno.skilltrust import (
+    TrustLevel, SkillPolicy, SkillProvenance, SkillReview,
+    SkillApprovalError, SkillApprover, can_load, provenance,
+)
+
+# ── Retry executor (audit #50) ───────────────────────────────────────────────
+
+from kerno.execution.retry import RetryExecutor
+
+# ── Agent isolation (K-009) ──────────────────────────────────────────────────
+
+from kerno.isolation import (
+    SharedMemory, SharedValue, NamespacePartition,
+    export_code, parse_export, isolate_seed_code,
+)
+
+# ── OS-level execution isolation (audit #3/#11/#69) ──────────────────────────
+
+from kerno.isolation_docker import (
+    DockerExecutor, DockerUnavailable, docker_available,
+)
 
 # ── Vault ────────────────────────────────────────────────────────────────────
 

@@ -28,6 +28,7 @@ class CellOutput:
     images:   list[str]              = field(default_factory=list)  # base64 PNG
     error:    Optional["CellError"]  = None
     duration: float                  = 0.0    # Wall time in seconds
+    execution_id: Optional[str]      = None   # Universal correlation key (audit #78)
 
     @property
     def has_error(self) -> bool:
@@ -125,6 +126,12 @@ class SessionResult:
     summary:         str          = ""
     started_at:      float        = field(default_factory=time.time)
     ended_at:        Optional[float] = None
+    # ── Execution-ledger correlation (audit #78) ────────────────────────
+    # Set by run()/run_with_pool(): the execution_ids this session
+    # produced (universal correlation key) and the policy rules that
+    # blocked cells, so callers can cross-reference the engine audit.
+    execution_ids:   list         = field(default_factory=list)
+    blocked_rules:   list         = field(default_factory=list)
 
     @property
     def duration(self) -> float:

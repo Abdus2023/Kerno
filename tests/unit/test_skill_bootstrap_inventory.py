@@ -107,3 +107,85 @@ def test_full_stack_composer_matches_bootstrap_domains():
 def test_composer_presets(preset):
     skill_set = preset()
     assert len(skill_set) > 0
+
+
+class TestOptionalPackSkipping:
+    """Audit #16: skill bootstrap degrades gracefully on missing deps."""
+
+    class ProbeKernel:
+        """Captures the probe cell; returns the requested missing set."""
+
+        def __init__(self, missing):
+            self._missing = missing
+            self.probe_code = ""
+
+        def execute(self, code, timeout=120.0, silent=False, **kwargs):
+            self.probe_code = code
+            from kerno.types import CellOutput
+            return CellOutput(stdout=repr(sorted(self._missing)) + "\n")
+
+        def execute_silent(self, code, timeout=15.0, **kwargs):
+            return ""
+
+        @property
+        def namespace(self):
+            return "{}"
+
+        @property
+        def is_alive(self):
+            return True
+
+    def test_probe_sends_real_deps_not_placeholder(self):
+        """Regression for the f-string bug: the probe cell must contain
+        the actual dependency list, not the literal '{deps!r}'."""
+        from kerno.skills.bootstrap import _probe_missing_deps
+        kernel = self.ProbeKernel({"pandas"})
+        result = _probe_missing_deps(kernel, ["pandas", "numpy"])
+        assert result == {"pandas"}
+        assert "{deps!r}" not in kernel.probe_code
+        assert "['numpy', 'pandas']" in kernel.probe_code
+
+    def test_probe_error_returns_empty(self):
+        """On probe failure, preserve existing behavior (assume present)."""
+        from kerno.skills.bootstrap import _probe_missing_deps
+
+        class BrokenKernel(self.ProbeKernel):
+            def execute(self, code, timeout=120.0, silent=False, **kwargs):
+                from kerno.types import CellError, CellOutput
+                return CellOutput(error=CellError("RuntimeError", "boom"))
+
+        assert _probe_missing_deps(BrokenKernel({}), ["pandas"]) == set()
+
+    def test_bootstrap_filters_modules_by_missing_deps(self, monkeypatch):
+        """bootstrap() skips modules whose deps are missing — no crash."""
+        import importlib
+        B = importlib.import_module("kerno.skills.bootstrap")
+
+        kernel = self.ProbeKernel({"pandas", "numpy", "matplotlib"})
+        loaded = []
+        monkeypatch.setattr(B.SkillRegistry, "load_code",
+                            lambda self, k, code, name, protect=True:
+                            loaded.append(name))
+
+        reg = B.bootstrap(kernel, skip_missing_deps=True)
+
+        # Data-dependent modules are skipped entirely
+        assert "data_skills" not in loaded
+        assert "viz_skills" not in loaded
+        # Dependency-free modules still load (introspect has deps now, but
+        # meta has none beyond IPython which is present)
+        assert loaded, "at least the dep-free modules must load"
+
+    def test_skip_missing_deps_false_loads_all(self, monkeypatch):
+        """Explicit opt-out: skip_missing_deps=False keeps old behavior."""
+        import importlib
+        B = importlib.import_module("kerno.skills.bootstrap")
+
+        kernel = self.ProbeKernel({"pandas"})
+        loaded = []
+        monkeypatch.setattr(B.SkillRegistry, "load_code",
+                            lambda self, k, code, name, protect=True:
+                            loaded.append(name))
+
+        B.bootstrap(kernel, skip_missing_deps=False)
+        assert "data_skills" in loaded   # no filtering at all

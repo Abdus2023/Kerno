@@ -14,6 +14,7 @@ from kerno.llm.openrouter import (
 from kerno.llm.router import (
     TaskAwareRouter, CostTrackingRouter, RoutingRule,
 )
+from kerno.llm.brain import ScriptedBrain
 
 __all__ = [
     "CachedLLM", "LoggedLLM", "FallbackLLM",
@@ -23,4 +24,5 @@ __all__ = [
     "list_openrouter_models", "cheapest_openrouter_model",
     "OPENROUTER_MODELS",
     "TaskAwareRouter", "CostTrackingRouter", "RoutingRule",
+    "ScriptedBrain",
 ]
