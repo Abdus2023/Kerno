@@ -45,6 +45,15 @@ skip_no_server = pytest.mark.skipif(
 
 
 @skip_no_server
+def test_health_live():
+    resp = httpx.get(f"{BASE_URL}/health/live")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "ok"
+    print(f"✓ Health Live: {data['status']}")
+
+
+@skip_no_server
 def test_health():
     resp = httpx.get(f"{BASE_URL}/health")
     assert resp.status_code == 200

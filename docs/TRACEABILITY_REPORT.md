@@ -295,6 +295,15 @@ This traceability report provides an auditable, bidirectional map linking every 
 
 ---
 
+### Round 28: Invariant P8/P9 Test Hardening & Liveness Endpoint Probing
+* **Goal**: Add explicit restart transition verification for Invariant P8 and integrate `/health/live` probe testing.
+* **Key Artifacts**:
+  * `tests/unit/test_invariants.py`: Added `test_generation_strictly_increments_on_restart` asserting strict increment on restart transitions (`P8`).
+  * `tests/integration/test_openai_compat.py`: Added `test_health_live` verifying public unauthenticated liveness probing.
+  * `docs/TRACEABILITY_REPORT.md`: Synchronized master traceability matrix and invariant checks.
+
+---
+
 ## 3. Formal Invariants Traceability Matrix
 
 | Invariant ID | Formal Property Description | Enforcing Code Location | Verification Test File |

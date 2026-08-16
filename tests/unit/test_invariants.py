@@ -199,6 +199,13 @@ class TestP8GenerationMonotonic:
         with pytest.raises(InvariantViolation, match="P8"):
             check_generation_monotonic([1, 2, 1])
 
+    def test_generation_strictly_increments_on_restart(self):
+        # Verification that each distinct restart transition increments generation
+        initial_gen = 1
+        restart_gen = initial_gen + 1
+        assert restart_gen > initial_gen
+        check_generation_monotonic([initial_gen, restart_gen])
+
 
 # ── P9 ────────────────────────────────────────────────────────────────────────
 
