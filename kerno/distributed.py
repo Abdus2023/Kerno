@@ -202,3 +202,66 @@ class DistributedExecutor:
     @property
     def is_alive(self) -> bool:
         return all(w.is_alive for w in self._pool.workers)
+
+
+class RemoteWorker:
+    """
+    Worker communicating with a remote Kerno daemon over HTTP / JSON RPC (audit #104).
+    """
+
+    def __init__(self, worker_id: str, endpoint: str, auth_token: str = ""):
+        self.worker_id  = worker_id
+        self.endpoint   = endpoint.rstrip("/")
+        self.auth_token = auth_token
+        self._served    = 0
+        self._alive     = True
+
+    def submit(self, request: ExecutionRequest) -> None:
+        import threading
+        t = threading.Thread(
+            target = self._execute_remote,
+            args   = (request,),
+            daemon = True,
+            name   = f"kerno-remote-worker-{self.worker_id}",
+        )
+        t.start()
+
+    def _execute_remote(self, request: ExecutionRequest) -> None:
+        import json
+        import urllib.request
+        from kerno.types import CellError, CellOutput
+
+        url = f"{self.endpoint}/run"
+        payload = json.dumps({
+            "task":      request.code,
+            "max_cells": 1,
+            "security":  "data_analysis",
+        }).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
+        if self.auth_token:
+            headers["Authorization"] = f"Bearer {self.auth_token}"
+
+        req = urllib.request.Request(url, data=payload, headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=request.timeout) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                output = CellOutput(
+                    stdout       = data.get("summary", ""),
+                    execution_id = request.request_id,
+                )
+                request.set_result(output)
+                self._served += 1
+        except Exception as exc:
+            request.set_error(f"RemoteWorkerError: {str(exc)}")
+
+    def shutdown(self) -> None:
+        self._alive = False
+
+    @property
+    def served(self) -> int:
+        return self._served
+
+    @property
+    def is_alive(self) -> bool:
+        return self._alive
+

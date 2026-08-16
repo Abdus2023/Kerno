@@ -220,3 +220,46 @@ def save_lock(
     target = Path(path)
     target.write_text(export_lock(environment))
     return target
+
+
+def verify_environment(
+    recorded:        EnvironmentSnapshot,
+    current:         Optional[EnvironmentSnapshot] = None,
+    strict_packages: bool                          = False,
+) -> tuple[bool, list[str]]:
+    """
+    Verify if the current environment is compatible with a recorded session environment.
+
+    Returns:
+        (compatible: bool, warnings: list[str])
+    """
+    curr = current or EnvironmentSnapshot.capture(recorded.kernel_spec)
+    warnings = []
+
+    # Check python major.minor
+    rec_py = ".".join(recorded.python_version.split(".")[:2])
+    curr_py = ".".join(curr.python_version.split(".")[:2])
+    if rec_py != curr_py:
+        warnings.append(
+            f"Python version mismatch: recorded {recorded.python_version}, current {curr.python_version}"
+        )
+
+    # Check kernel spec
+    if recorded.kernel_spec != curr.kernel_spec:
+        warnings.append(
+            f"Kernel spec mismatch: recorded {recorded.kernel_spec}, current {curr.kernel_spec}"
+        )
+
+    # Check package versions if strict
+    if strict_packages:
+        for pkg, ver in recorded.packages.items():
+            curr_ver = curr.packages.get(pkg)
+            if curr_ver is None:
+                warnings.append(f"Missing package: {pkg} (recorded {ver})")
+            elif curr_ver != ver:
+                warnings.append(
+                    f"Package version mismatch: {pkg} recorded {ver}, current {curr_ver}"
+                )
+
+    return len(warnings) == 0, warnings
+

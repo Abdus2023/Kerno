@@ -328,6 +328,16 @@ def main() -> int:
         help    = "Save report to JSON file",
     )
 
+    # ── verify-env ────────────────────────────────────────────────────────────
+    verify_p = sub.add_parser(
+        "verify-env", help="Verify environment against a reproducibility manifest"
+    )
+    verify_p.add_argument("manifest", help="Path to <session_id>.manifest.json")
+    verify_p.add_argument(
+        "--strict", action="store_true", default=False,
+        help="Enforce strict package version matching",
+    )
+
     # ── Parse ─────────────────────────────────────────────────────────────────
     args = parser.parse_args()
 
@@ -341,15 +351,18 @@ def main() -> int:
 
     # Dispatch
     handlers = {
-        "run":     cmd_run,
-        "session": cmd_session,
-        "memory":  cmd_memory,
-        "config":  cmd_config,
-        "doctor":  cmd_doctor,
-        "metrics": cmd_metrics,
-        "repl":    cmd_repl,
-        "serve":   cmd_serve,
-        "bench":   cmd_bench,
+        "run":        cmd_run,
+        "resume":     cmd_resume,
+        "fork":       cmd_fork,
+        "session":    cmd_session,
+        "memory":     cmd_memory,
+        "config":     cmd_config,
+        "doctor":     cmd_doctor,
+        "metrics":    cmd_metrics,
+        "repl":       cmd_repl,
+        "serve":      cmd_serve,
+        "bench":      cmd_bench,
+        "verify-env": cmd_verify_env,
     }
 
     handler = handlers.get(args.command)
@@ -1144,3 +1157,39 @@ def cmd_bench(args, config) -> int:
         print("\n✓ Report saved → {}".format(output))
 
     return 0 if report.pass_rate >= 0.8 else 1
+
+
+def cmd_verify_env(args, config) -> int:
+    """Execute: kerno verify-env <manifest_path> (audit #57)"""
+    from kerno.reproducibility import ReproducibilityManifest, verify_environment
+
+    path = Path(args.manifest)
+    if not path.exists():
+        print(f"❌ Error: Manifest file not found: {path}", file=sys.stderr)
+        return 1
+
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        manifest = ReproducibilityManifest.from_dict(data)
+    except Exception as exc:
+        print(f"❌ Error loading manifest: {exc}", file=sys.stderr)
+        return 1
+
+    compat, warnings = verify_environment(manifest.environment, strict_packages=args.strict)
+    print(f"Checking environment compatibility for session: {manifest.session_id}")
+    print("─" * 60)
+    print(f"  Target Kernel Spec: {manifest.environment.kernel_spec}")
+    print(f"  Target Python:      {manifest.environment.python_version}")
+    print(f"  Target Platform:    {manifest.environment.platform}")
+    print(f"  Recorded Packages:  {len(manifest.environment.packages)}")
+    print("─" * 60)
+
+    if compat:
+        print("✅ Environment is compatible with the recorded session manifest.")
+        return 0
+    else:
+        print("⚠️  Environment discrepancies detected:")
+        for w in warnings:
+            print(f"  ✗ {w}")
+        return 1
+

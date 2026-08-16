@@ -107,6 +107,7 @@ def create_app(
     pool   = KernelPool(size=pool_size, skills_path=skills_path)
     memory = SimpleMemoryStore(persist_path=memory_path)
     sessions: dict[str, SessionResult] = {}
+    active_tokens: dict[str, object] = {}
 
     pool.start()
 
@@ -126,25 +127,45 @@ def create_app(
         from kerno.telemetry import get_metrics
         return get_metrics().snapshot()
 
+    @app.post("/sessions/{session_id}/cancel")
+    async def cancel_session(session_id: str):
+        """Cancel an actively executing session (audit #83)."""
+        token = active_tokens.get(session_id)
+        if not token:
+            return JSONResponse(
+                status_code = 404,
+                content     = {"error": f"Active session {session_id} not found or already completed"}
+            )
+        if hasattr(token, "cancel"):
+            token.cancel()
+        return {"status": "cancelling", "session_id": session_id}
+
     @app.post("/run", response_model=RunResponse)
     async def run_task(request: RunRequest):
         """
         Execute a task synchronously.
         Returns when the task completes (or fails).
         """
+        from kerno.cancel import CancellationToken
+
         session_id = str(uuid.uuid4())
         task_id    = "http-{}".format(session_id[:8])
+        cancel_token = CancellationToken()
+        active_tokens[session_id] = cancel_token
 
         kernel = pool.acquire(task_id)
         try:
             result = await asyncio.get_event_loop().run_in_executor(
                 None,
                 lambda: _execute_task(
-                    kernel      = kernel,
-                    llm         = llm,
-                    request     = request,
-                    session_id  = session_id,
-                    memory      = memory if request.memory else None,
+                    kernel            = kernel,
+                    llm               = llm,
+                    request           = request,
+                    session_id        = session_id,
+                    memory            = memory if request.memory else None,
+                    capability_broker = capability_broker,
+                    budget            = budget,
+                    cancel_token      = cancel_token,
                 )
             )
             sessions[result.session_id] = result
@@ -165,6 +186,7 @@ def create_app(
                 error          = str(e)[:500],
             )
         finally:
+            active_tokens.pop(session_id, None)
             pool.release(task_id, reason="complete")
 
     @app.post("/stream")
@@ -336,6 +358,7 @@ def _execute_task(
     memory,
     capability_broker: Optional[object] = None,
     budget:            Optional[object] = None,
+    cancel_token:      Optional[object] = None,
 ) -> SessionResult:
     """Execute a task synchronously in a kernel — through the choke point."""
     from kerno.loop.factory       import make_reactive, make_reflect
@@ -373,13 +396,22 @@ def _execute_task(
         max_cells = request.max_cells,
     )
 
+    meta = {}
+    if cancel_token is not None:
+        meta["cancel_token"] = cancel_token
+
     started = time.time()
-    state   = AgentState(task=request.task, session_id=session_id)
+    state   = AgentState(task=request.task, session_id=session_id, metadata=meta)
     final   = pipeline.run(state)
 
     from kerno.types import SessionResult, SessionStatus, Cell
+    interrupted = (
+        final.metadata.get("interrupted", False)
+        or (cancel_token is not None and getattr(cancel_token, "is_set", lambda: False)())
+    )
     status = (
-        SessionStatus.COMPLETE       if final.complete
+        SessionStatus.INTERRUPTED    if interrupted
+        else SessionStatus.COMPLETE  if final.complete
         else SessionStatus.ERROR_UNHANDLED if final.error
         else SessionStatus.MAX_CELLS
     )

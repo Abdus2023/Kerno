@@ -140,3 +140,19 @@ class TestDistributedProtocol:
             assert ex.is_alive is True
             assert ex.namespace == "{}"
             assert ex.execute_silent("s") == "[w0] s"
+
+
+class TestRemoteWorker:
+    """Audit #104: Remote worker execution across network boundaries."""
+
+    def test_remote_worker_initialization(self):
+        from kerno.distributed import RemoteWorker
+
+        worker = RemoteWorker("rw-1", "http://localhost:8001", auth_token="test-secret")
+        assert worker.worker_id == "rw-1"
+        assert worker.endpoint == "http://localhost:8001"
+        assert worker.auth_token == "test-secret"
+        assert worker.is_alive is True
+        assert worker.served == 0
+        worker.shutdown()
+        assert worker.is_alive is False

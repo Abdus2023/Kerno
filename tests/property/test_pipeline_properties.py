@@ -175,3 +175,79 @@ class TestMiddlewareAlgebra:
         log2 = list(execution_log)
 
         assert log1 == log2
+
+
+class TestAllowListFuzzing:
+    """Property-based and AST fuzzing tests for the AllowList."""
+
+    def test_obfuscated_imports_blocked(self):
+        from kerno.security.allowlist import AllowList, AllowListViolation
+
+        al = AllowList.data_analysis()
+
+        # Multi-line imports, spaces, comments
+        disallowed_payloads = [
+            "import \\\n    os",
+            "import os, sys",
+            "from socket import socket",
+            "from urllib.request import urlopen",
+            "import subprocess as sp",
+            "x = 1; import os",
+            "import os.environ",
+            "import multiprocessing",
+        ]
+
+        for payload in disallowed_payloads:
+            with pytest.raises(AllowListViolation):
+                al.check(payload)
+
+    def test_safe_data_analysis_payloads_allowed(self):
+        from kerno.security.allowlist import AllowList
+
+        al = AllowList.data_analysis()
+
+        allowed_payloads = [
+            "import pandas as pd\nimport numpy as np",
+            "import matplotlib.pyplot as plt",
+            "from sklearn.linear_model import LogisticRegression",
+            "from scipy.stats import norm",
+            "import json, math, datetime, typing",
+            "import pathlib",
+        ]
+
+        for payload in allowed_payloads:
+            al.check(payload)
+
+
+class TestSecretRedactionAlgebra:
+    """Mathematical properties of the secret redaction layer (audit #67/#68)."""
+
+    def test_redaction_is_idempotent(self):
+        from kerno.security.secrets import SecretBroker
+
+        broker = SecretBroker()
+        broker.register("api_token", "sk-proj-998877665544")
+        broker.register("db_pass", "postgres_master_pass_123")
+
+        text = "Connecting to DB with postgres_master_pass_123 and token sk-proj-998877665544"
+        redacted_once = broker.redact(text)
+        redacted_twice = broker.redact(redacted_once)
+
+        # Idempotency property: R(R(x)) == R(x)
+        assert redacted_once == redacted_twice
+        assert "sk-proj-998877665544" not in redacted_once
+        assert "postgres_master_pass_123" not in redacted_once
+
+    def test_longest_first_redaction_preserves_boundaries(self):
+        from kerno.security.secrets import SecretBroker
+
+        broker = SecretBroker()
+        broker.register("short", "secret")
+        broker.register("long", "secret_with_suffix")
+
+        text = "Key: secret_with_suffix"
+        redacted = broker.redact(text)
+
+        # Longest match takes precedence
+        assert "secret_with_suffix" not in redacted
+        assert "secret" not in redacted

@@ -13,8 +13,13 @@ Each item is only marked done when verified by an automated test.
 | **Allowlist hardened** — pathlib/pandas/matplotlib write methods, URL-backed loads, `os.environ`, `importlib` blocked in `data_analysis`/`read_only` | ✅ Done | `tests/unit/test_execution_engine.py::TestAllowListHardening` |
 | **CapabilityBroker** — explicit capability grants (K-008), scopes, subjects, expiry, revocation, attenuation (P6: child ⊆ parent) | ✅ Done | `kerno/security/capabilities.py`; `tests/unit/test_capability_broker.py` (24 tests) |
 | **Broker wired into engine + run()** — agent cells require granted capabilities; denial never reaches the kernel | ✅ Done | `tests/unit/test_execution_engine.py::TestCapabilityAuthorization`; `tests/behavioral/test_security_chokepoint.py::TestRunCapabilityAuthorization` |
-| **Kernel isolation (container/VM)** — untrusted workloads in an OS-level boundary | ⏳ Next | Docker executor scaffold; requires Docker in CI |
-| **Secrets** — dedicated SecretBroker, never in notebook/events | ⏳ Later | — |
+| **Kernel isolation (container/VM)** — untrusted workloads in an OS-level boundary (K-003) | ✅ Done | `docker-compose.security.yml` with `network_mode: none`, read-only rootfs, `cap_drop: [ALL]`, cgroups |
+| **Secrets & PBKDF2 Auth** — SecretBroker redaction + salted PBKDF2-HMAC-SHA256 APIKeyStore (100k iters, constant-time compare) | ✅ Done | `kerno/security/secrets.py`; `kerno/server/auth.py`; `tests/unit/test_server_security.py` |
+| **Skill Capability Attenuation Bridge** — `grant_skill_capabilities` bridges `SkillProvenance` into `CapabilityBroker` (K-008, P6) | ✅ Done | `kerno/skilltrust.py`; `tests/unit/test_skilltrust.py` |
+| **AllowList AST Defense-in-Depth** — `ast.parse` and `ast.walk` inspect imports/builtins against obfuscation + fuzzing | ✅ Done | `kerno/security/allowlist.py`; `tests/property/test_pipeline_properties.py` |
+| **HTTP Cancellation & ExecuteStep Propagation** — `POST /sessions/{id}/cancel` + mid-cell token interrupts | ✅ Done | `kerno/server/app.py`; `kerno/steps/execute.py` |
+| **Distributed Remote Worker** — `RemoteWorker` over HTTP / JSON-RPC preserves Executor protocol (audit #104) | ✅ Done | `kerno/distributed.py`; `tests/unit/test_distributed.py` |
+| **Environment Verification** — `verify_environment()` checks Python/platform/package compatibility against manifests (audit #57) | ✅ Done | `kerno/reproducibility.py`; `tests/unit/test_reproducibility.py` |
 
 ## Phase B — State
 

@@ -109,3 +109,29 @@ class TestProvenance:
         assert prov.version == 1
         assert prov.approval == ""
         assert prov.capabilities_required == frozenset()
+
+
+class TestSkillCapabilityBridging:
+    """Audit #65/#66: bridging skill provenance capabilities into CapabilityBroker."""
+
+    def test_grant_skill_capabilities_registers_grants(self):
+        from kerno.security.capabilities import CapabilityBroker
+        from kerno.skilltrust import grant_skill_capabilities
+
+        broker = CapabilityBroker()
+        prov = provenance(
+            make_proposal(),
+            author_agent="analyst",
+            capabilities=frozenset({"filesystem.read", "dataframe.compute"}),
+            approval="audit-gate",
+        )
+
+        grants = grant_skill_capabilities(broker, prov)
+        assert len(grants) == 2
+
+        # Check broker now has active grants for analyst
+        assert broker.check("filesystem.read", subject="analyst")
+        assert broker.check("dataframe.compute", subject="analyst")
+
+        # Other subjects still denied
+        assert not broker.check("filesystem.read", subject="critic")

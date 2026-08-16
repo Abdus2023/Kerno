@@ -186,3 +186,35 @@ class TestPerRequestBudget:
             c.output.has_error and c.output.error.ename == "BudgetExceeded"
             for c in result.cells
         )
+
+
+class TestAPIKeyStoreHardening:
+    """Hardened PBKDF2 API key store with constant-time matching (Phase D)."""
+
+    def test_key_validation_success_and_failure(self):
+        from kerno.server.auth import APIKeyStore
+
+        store = APIKeyStore(iterations=1000)
+        store.add_key("test-token-xyz", "user-42", "prod-key", rate_limit=250)
+
+        # Valid key resolves
+        info = store.validate("test-token-xyz")
+        assert info is not None
+        assert info["user_id"] == "user-42"
+        assert info["rate_limit"] == 250
+
+        # Invalid key rejected
+        assert store.validate("test-token-wrong") is None
+        assert store.validate("") is None
+
+    def test_keys_stored_with_unique_salts(self):
+        from kerno.server.auth import APIKeyStore
+
+        store = APIKeyStore(iterations=1000)
+        store.add_key("same-secret", "user-1")
+        store.add_key("same-secret", "user-2")
+
+        # Two identical keys should have different derived hashes due to unique salts
+        entries = list(store._keys.values())
+        assert len(entries) == 2
+        assert entries[0]["salt_hex"] != entries[1]["salt_hex"]

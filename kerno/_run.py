@@ -13,6 +13,7 @@ from kerno.effects             import EffectLedger
 from kerno.execution.budget    import BudgetedExecutor, ExecutionBudget
 from kerno.execution.engine    import ExecutionEngine
 from kerno.execution.modes     import DryRunExecutor
+from kerno.execution.retry     import RetryExecutor
 from kerno.kernel.pool         import KernelPool
 from kerno.kernel.runtime      import KernelRuntime
 from kerno.loop.debate         import DebateLoop
@@ -71,6 +72,7 @@ def run(
     isolation:            str                     = "shared",
     mode:                 str                     = "live",   # "live" | "dry_run"
     cancel_token:         object | None           = None,     # audit #83
+    max_retries:          int                     = 0,        # audit #50
     verbose:              bool                    = False,
 ) -> SessionResult:
     """
@@ -226,6 +228,9 @@ def run(
             # Budget enforcement wraps the choke point: exhausted budgets
             # refuse further executions before they reach the kernel.
             engine = BudgetedExecutor(engine, budget)
+        if max_retries > 0:
+            # Action-level retries wrap the engine with idempotency policy (audit #50)
+            engine = RetryExecutor(engine, max_retries=max_retries)
 
         # ── Comms (live only: needs kernel internals) ────────────────────
         comm = None
@@ -391,6 +396,7 @@ def run_with_pool(
     effect_ledger:   EffectLedger | None = None,
     approval_gate:   ApprovalGate | None = None,
     cancel_token:    object | None      = None,
+    max_retries:     int                = 0,
     save_notebooks:  bool               = False,
     notebook_dir:    str                = "sessions",
     auto_restart:    bool               = False,
@@ -432,6 +438,8 @@ def run_with_pool(
                 )
                 if budget is not None:
                     engine = BudgetedExecutor(engine, budget)
+                if max_retries > 0:
+                    engine = RetryExecutor(engine, max_retries=max_retries)
 
                 loop_cls = {
                     "reactive": ReactiveLoop,

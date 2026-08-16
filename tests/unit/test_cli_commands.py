@@ -136,3 +136,37 @@ class TestCliDryRunFallback:
         assert used == ["anthropic"]          # real LLM path taken
         out = capsys.readouterr().out
         assert "ScriptedBrain" not in out     # no fallback
+
+
+class TestCliVerifyEnv:
+    """kerno verify-env validates environment snapshots from CLI (audit #57)."""
+
+    def test_verify_env_cli_success(self, tmp_path, monkeypatch, capsys):
+        import sys
+        from kerno.cli import main as cli
+        from kerno.reproducibility import EnvironmentSnapshot, ReproducibilityManifest
+
+        env = EnvironmentSnapshot.capture("python3")
+        manifest = ReproducibilityManifest(
+            session_id="sess-cli-test",
+            task_hash="abc",
+            environment=env,
+        )
+        manifest_path = tmp_path / "sess-cli-test.manifest.json"
+        manifest_path.write_text(manifest.to_json())
+
+        monkeypatch.setattr(cli, "load_config",
+                            lambda path: __import__("kerno.config", fromlist=["KernoConfig"]).KernoConfig())
+
+        old = sys.argv
+        sys.argv = ["kerno", "verify-env", str(manifest_path)]
+        try:
+            code = cli.main()
+        except SystemExit as e:
+            code = e.code
+        finally:
+            sys.argv = old
+
+        assert code == 0
+        out = capsys.readouterr().out
+        assert "Environment is compatible" in out

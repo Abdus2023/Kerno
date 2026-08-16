@@ -3,6 +3,22 @@
 All notable changes to Kerno are documented here, grouped by the deep-audit
 implementation phases (see `docs/kerno-deep-audit.md`).
 
+## [0.2.1-dev] — 2026-08-16 (Traceability & Phase D/E Hardening)
+
+### Security & Hardening (Phase D)
+- **PBKDF2-HMAC-SHA256 APIKeyStore** — upgraded from raw SHA-256 to salted PBKDF2 (100,000 iterations standard, 16-byte cryptographically random salt per key) with constant-time comparison (`hmac.compare_digest`) in `kerno/server/auth.py`.
+- **Skill Capability Attenuation Bridge** — implemented `grant_skill_capabilities()` bridging `SkillProvenance` declared capabilities into `CapabilityBroker` grants with strict subject scoping (`K-008`, `P6`) in `kerno/skilltrust.py`.
+- **Container Sandbox Profile** — added `docker-compose.security.yml` specifying the K-003 containment boundary (`cap_drop: [ALL]`, `read_only: true`, `network_mode: none`, `tmpfs`, and cgroups limits).
+- **HTTP Server Cancellation** — added `POST /sessions/{session_id}/cancel` and thread-safe `CancellationToken` request mapping in `kerno/server/app.py`; wired mid-cell cancellation checks into `ExecuteStep` in `kerno/steps/execute.py`.
+- **Action Retry Facade Integration** — wired `max_retries` and `RetryExecutor` directly into public `run()` and `run_with_pool()` in `kerno/_run.py` (audit #50).
+
+### Verification & Scale (Phase E)
+- **AllowList AST Defense-in-Depth** — augmented regex pattern matching with `ast.parse` and `ast.walk` to inspect all imports, from-imports, and calls against obfuscated syntax (e.g. multi-line imports, whitespace evasion) in `kerno/security/allowlist.py`.
+- **Property-Based AllowList Fuzzing** — added `TestAllowListFuzzing` in `tests/property/test_pipeline_properties.py`.
+- **Distributed Remote Worker** — implemented `RemoteWorker` supporting HTTP/JSON-RPC communication with remote Kerno daemons in `kerno/distributed.py` (audit #104).
+- **Reproducibility Environment Verification** — added `verify_environment()` for automated validation of Python versions, platform info, and package dependencies against recorded `ReproducibilityManifest` snapshots in `kerno/reproducibility.py`.
+- **Traceability Report** — added `docs/TRACEABILITY_REPORT.md` providing bidirectional mapping across requirements, findings 01–16, invariants K-001–K-010, and verification test gates.
+
 ## [0.2.0] — 2026-08-16
 
 ### Security (Phase A)

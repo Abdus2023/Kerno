@@ -13,6 +13,7 @@ The allowlist is enforced at two levels:
 
 from __future__ import annotations
 
+import ast
 import re
 from dataclasses import dataclass, field
 
@@ -79,7 +80,7 @@ class AllowList:
                     f"blocked_builtin:{builtin}", builtin
                 )
 
-        # Check imports against allowed modules
+        # Check imports against allowed modules (regex pass)
         if self.allowed_modules:
             import_pattern = re.compile(
                 r'^\s*(?:import|from)\s+([\w.]+)', re.MULTILINE
@@ -93,6 +94,40 @@ class AllowList:
                     raise AllowListViolation(
                         "disallowed_import", f"import {module}"
                     )
+
+        # AST analysis (defense-in-depth against whitespace/syntax obfuscation)
+        try:
+            tree = ast.parse(code)
+            for node in ast.walk(tree):
+                if self.allowed_modules:
+                    if isinstance(node, ast.Import):
+                        for alias in node.names:
+                            module = alias.name
+                            if not any(
+                                module == allowed or module.startswith(allowed + ".")
+                                for allowed in self.allowed_modules
+                            ):
+                                raise AllowListViolation(
+                                    "disallowed_import", f"import {module}"
+                                )
+                    elif isinstance(node, ast.ImportFrom):
+                        if node.module:
+                            module = node.module
+                            if not any(
+                                module == allowed or module.startswith(allowed + ".")
+                                for allowed in self.allowed_modules
+                            ):
+                                raise AllowListViolation(
+                                    "disallowed_import", f"from {module} import ..."
+                                )
+                if self.blocked_builtins and isinstance(node, ast.Call):
+                    if isinstance(node.func, ast.Name) and node.func.id in self.blocked_builtins:
+                        raise AllowListViolation(
+                            f"blocked_builtin:{node.func.id}", node.func.id
+                        )
+        except SyntaxError:
+            # Non-python syntax (e.g. IPython magics/shell escapes) already handled by regex pass
+            pass
 
     # ── Preset profiles ───────────────────────────────────────────────────────
 

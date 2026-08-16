@@ -173,3 +173,21 @@ class TestKernelPoolScheduler:
                 assert False, "expected ValueError"
             except ValueError:
                 pass
+
+
+    def test_pool_soak_sequential_recycling(self):
+        """Audit #81/#82: sequential acquisition, execution, and release across tasks."""
+        with KernelPool(size=2, overflow=False) as pool:
+            for i in range(5):
+                task_id = f"soak-task-{i}"
+                kernel = pool.acquire(task_id)
+                out = kernel.execute(f"val_{i} = {i}\nprint(val_{i})", timeout=20)
+                assert not out.has_error
+                assert f"{i}" in out.stdout
+                pool.release(task_id, reason="complete")
+
+            # Check stats
+            stats = pool.stats
+            assert stats["size"] == 2
+            assert stats["active"] == 0
+            assert stats["available"] == 2

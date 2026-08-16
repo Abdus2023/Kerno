@@ -183,3 +183,27 @@ def provenance(
         version               = version,
         approval              = approval,
     )
+
+
+def grant_skill_capabilities(
+    broker: object,
+    prov: SkillProvenance,
+    *,
+    subject: str = "",
+    issuer:  str = "skill_trust",
+) -> list:
+    """
+    Bridge skill provenance capabilities into CapabilityBroker grants (audit #65/#66).
+
+    Grants the capabilities declared in SkillProvenance to the broker,
+    attributing the grant to the skill's author_agent or explicit subject.
+    """
+    if broker is None or not prov.capabilities_required:
+        return []
+    subj = subject or prov.author_agent or ""
+    return broker.grant_many(
+        prov.capabilities_required,
+        subject = subj,
+        issuer  = issuer or prov.approval or "skill_trust",
+    )
+

@@ -205,10 +205,12 @@ class Pipeline:
             from kerno.skills.bootstrap   import bootstrap
             from kerno.loop.factory       import make_reactive, make_reflect
             from kerno.interfaces         import AgentState
+            from kerno.server.security    import make_server_engine
             from kerno.streaming.executor import StreamingExecutor
             from kerno.streaming.protocol import EventKind
 
             bootstrap(kernel)
+            engine = make_server_engine(kernel, profile="data_analysis")
 
             factory_map = {
                 "reactive": make_reactive,
@@ -216,7 +218,7 @@ class Pipeline:
             }
             factory  = factory_map.get(self.valves.LOOP_STRATEGY, make_reactive)
             pipeline = factory(
-                kernel    = kernel,
+                kernel    = engine,
                 llm       = llm,
                 memory    = self._memory,
                 max_cells = self.valves.MAX_CELLS,
@@ -325,11 +327,13 @@ class Pipeline:
             from kerno.skills.bootstrap import bootstrap
             from kerno.loop.factory     import make_reactive
             from kerno.interfaces       import AgentState
+            from kerno.server.security  import make_server_engine
 
             bootstrap(kernel)
+            engine = make_server_engine(kernel, profile="data_analysis")
 
             pipeline = make_reactive(
-                kernel    = kernel,
+                kernel    = engine,
                 llm       = llm,
                 memory    = self._memory,
                 max_cells = self.valves.MAX_CELLS,

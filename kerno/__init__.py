@@ -313,6 +313,7 @@ from kerno.scheduler import (
 
 from kerno.distributed import (
     Worker, WorkerPool, DistributedExecutor, ExecutionRequest,
+    RemoteWorker,
 )
 
 # ── Capability execution (audit #31/#48) ─────────────────────────────────────
@@ -327,7 +328,7 @@ from kerno.capability_exec import (
 from kerno.reproducibility import (
     EnvironmentSnapshot, ReproducibilityManifest,
     build_manifest, save_manifest, export_lock, save_lock,
-    hash_text, hash_file,
+    hash_text, hash_file, verify_environment,
 )
 
 # ── Action model + state machine (audit #45-#49, P10) ───────────────────────
@@ -392,6 +393,7 @@ from kerno.bus import (
 from kerno.skilltrust import (
     TrustLevel, SkillPolicy, SkillProvenance, SkillReview,
     SkillApprovalError, SkillApprover, can_load, provenance,
+    grant_skill_capabilities,
 )
 
 # ── Retry executor (audit #50) ───────────────────────────────────────────────

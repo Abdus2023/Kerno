@@ -236,3 +236,45 @@ class TestNotebookRedaction:
         trail.add_cell(self._cell("api_key = 'sk-nb-123'"))
         code_cells = [c for c in trail._nb.cells if c.cell_type == "code"]
         assert "sk-nb-123" in code_cells[0].source
+
+
+class TestVerifyEnvironment:
+    """Audit #57: Verifying environment compatibility against recorded manifests."""
+
+    def test_matching_environment_passes(self):
+        from kerno.reproducibility import EnvironmentSnapshot, verify_environment
+
+        env = EnvironmentSnapshot(
+            python_version="3.11.2",
+            platform="Linux",
+            kernel_spec="python3",
+            packages={"pandas": "2.0.0", "numpy": "1.24.0"},
+        )
+        compat, warnings = verify_environment(env, env)
+        assert compat is True
+        assert len(warnings) == 0
+
+    def test_mismatched_python_version_warns(self):
+        from kerno.reproducibility import EnvironmentSnapshot, verify_environment
+
+        env1 = EnvironmentSnapshot("3.10.4", "Linux", "python3")
+        env2 = EnvironmentSnapshot("3.11.2", "Linux", "python3")
+
+        compat, warnings = verify_environment(env1, env2)
+        assert compat is False
+        assert any("Python version mismatch" in w for w in warnings)
+
+    def test_strict_package_checks(self):
+        from kerno.reproducibility import EnvironmentSnapshot, verify_environment
+
+        env1 = EnvironmentSnapshot("3.11.2", "Linux", "python3", packages={"pandas": "2.0.0"})
+        env2 = EnvironmentSnapshot("3.11.2", "Linux", "python3", packages={"pandas": "2.1.0"})
+
+        # Non-strict ignores package diffs
+        compat, warnings = verify_environment(env1, env2, strict_packages=False)
+        assert compat is True
+
+        # Strict catches package version diffs
+        compat_strict, warnings_strict = verify_environment(env1, env2, strict_packages=True)
+        assert compat_strict is False
+        assert any("Package version mismatch" in w for w in warnings_strict)

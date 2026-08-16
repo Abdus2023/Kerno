@@ -28,37 +28,65 @@ except ImportError:
 
 class APIKeyStore:
     """
-    Simple in-memory API key store.
-    Replace with a database in production.
+    Hardened API key store with salted PBKDF2-HMAC-SHA256 key derivation
+    and constant-time comparison (audit #16 / Phase D).
     """
 
-    def __init__(self):
+    def __init__(self, iterations: int = 100_000):
         self._keys: dict[str, dict] = {}
+        self.iterations = iterations
+
+    def _derive(self, key: str, salt: bytes) -> str:
+        return hashlib.pbkdf2_hmac(
+            "sha256", key.encode("utf-8"), salt, self.iterations
+        ).hex()
 
     def add_key(
         self,
-        key:       str,
-        user_id:   str,
-        name:      str       = "",
-        rate_limit: int      = 100,    # Requests per hour
-        max_cells:  int      = 50,     # Max cells per session
+        key:        str,
+        user_id:    str,
+        name:       str       = "",
+        rate_limit: int       = 100,    # Requests per hour
+        max_cells:  int       = 50,     # Max cells per session
+        salt:       Optional[str] = None,
     ) -> None:
-        key_hash = hashlib.sha256(key.encode()).hexdigest()
-        self._keys[key_hash] = {
-            "user_id":    user_id,
-            "name":       name,
-            "rate_limit": rate_limit,
-            "max_cells":  max_cells,
-            "created_at": time.time(),
-            "active":     True,
+        import secrets
+
+        # 16-byte random salt per key
+        salt_bytes = bytes.fromhex(salt) if salt else secrets.token_bytes(16)
+        derived    = self._derive(key, salt_bytes)
+        legacy_hash = hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+        self._keys[derived] = {
+            "user_id":     user_id,
+            "name":        name,
+            "rate_limit":  rate_limit,
+            "max_cells":   max_cells,
+            "created_at":  time.time(),
+            "active":      True,
+            "salt_hex":    salt_bytes.hex(),
+            "legacy_hash": legacy_hash,
         }
 
     def validate(self, key: str) -> Optional[dict]:
-        """Validate an API key. Returns user info or None."""
-        key_hash = hashlib.sha256(key.encode()).hexdigest()
-        info     = self._keys.get(key_hash)
-        if info and info.get("active"):
-            return info
+        """
+        Validate an API key using constant-time comparison.
+        Returns user info on match, or None.
+        """
+        import hmac
+
+        if not key:
+            return None
+
+        # Check against salted derivations in constant time
+        for derived_hash, info in self._keys.items():
+            if not info.get("active"):
+                continue
+            salt_bytes = bytes.fromhex(info["salt_hex"])
+            candidate = self._derive(key, salt_bytes)
+            if hmac.compare_digest(derived_hash, candidate):
+                return info
+
         return None
 
     def from_env(self) -> "APIKeyStore":
