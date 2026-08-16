@@ -10,15 +10,17 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.kerno
-    ports:
-      - "8001:8001"
+    expose:
+      - "8001"
     environment:
       # LLM
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - KERNO_MODEL=${KERNO_MODEL:-anthropic/claude-opus-4-5}
 
-      # Auth (comma-separated: key:userid:name)
-      - KERNO_API_KEYS=${KERNO_API_KEYS:-}
+      # Auth (fail closed in production)
+      - KERNO_RUNTIME_MODE=production
+      - KERNO_ENABLE_AUTH=${KERNO_ENABLE_AUTH:-true}
+      - KERNO_API_KEYS=${KERNO_API_KEYS:?KERNO_API_KEYS is required in production}
 
       # Resources
       - KERNO_POOL_SIZE=${KERNO_POOL_SIZE:-5}
@@ -30,7 +32,6 @@ services:
       - KERNO_SESSIONS_PATH=/sessions
 
       # Features
-      - KERNO_ENABLE_AUTH=${KERNO_ENABLE_AUTH:-false}
       - KERNO_ENABLE_MEMORY=${KERNO_ENABLE_MEMORY:-true}
 
     volumes:

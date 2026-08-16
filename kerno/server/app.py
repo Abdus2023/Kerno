@@ -32,8 +32,9 @@ if HAS_FASTAPI:
         loop:          str  = "reactive"
         max_cells:     int  = 50
         memory:        bool = False
-        security:      str  = "none"
+        security:      str  = "permissive"   # "none" opts out entirely
         save_notebook: bool = False
+        budget_cells:  Optional[int] = None   # ExecutionBudget cap (audit #85)
 
     class RunResponse(BaseModel):
         session_id:     str
@@ -47,31 +48,16 @@ if HAS_FASTAPI:
 def create_app(
     llm,
     *,
-    skills_path:  Optional[str] = None,
-    memory_path:  str           = ".kerno/memory.json",
-    pool_size:    int           = 3,
-    cors_origins: list[str]     = ["*"],
+    skills_path:       Optional[str] = None,
+    memory_path:       str           = ".kerno/memory.json",
+    pool_size:         int           = 3,
+    cors_origins:      list[str]     = ["*"],
+    capability_broker: Optional[object] = None,
+    budget:            Optional[object] = None,
+    default_security:  str           = "data_analysis",
 ) -> "FastAPI":
     """
-    Create and configure the FastAPI application.
-
-    Args:
-        llm:          LLM callable for all sessions
-        skills_path:  Path to extra skills file
-        memory_path:  Path to memory store
-        pool_size:    Number of warm kernels in the pool
-        cors_origins: Allowed CORS origins
-
-    Returns:
-        Configured FastAPI app
-
-    Usage:
-        import uvicorn
-        from kerno.server.app import create_app
-        from kerno.llm        import anthropic_llm
-
-        app = create_app(llm=anthropic_llm("claude-opus-4-5"))
-        uvicorn.run(app, host="0.0.0.0", port=8000)
+    Create and configure the FastAPI application with universal gateway governance (K-011).
     """
     if not HAS_FASTAPI:
         raise ImportError(
@@ -79,19 +65,24 @@ def create_app(
             "Install with: pip install fastapi uvicorn"
         )
 
-    from kerno.kernel.pool   import KernelPool
-    from kerno.memory.simple import SimpleMemoryStore
+    from kerno.kernel.pool    import KernelPool
+    from kerno.memory.simple  import SimpleMemoryStore
+    from kerno.server.security import make_server_engine
+    from kerno.cancel         import CancellationToken
+    from kerno.execution.budget import ExecutionBudget
 
-    app    = FastAPI(
+    app = FastAPI(
         title       = "kerno",
         description = "A kernel-native agent runtime",
-        version     = "0.1.0",
+        version     = "0.2.1-dev",
     )
 
+    # Wildcard origins must not allow credentials in production
+    allow_creds = cors_origins != ["*"]
     app.add_middleware(
         CORSMiddleware,
         allow_origins     = cors_origins,
-        allow_credentials = True,
+        allow_credentials = allow_creds,
         allow_methods     = ["*"],
         allow_headers     = ["*"],
     )
@@ -100,13 +91,39 @@ def create_app(
     pool   = KernelPool(size=pool_size, skills_path=skills_path)
     memory = SimpleMemoryStore(persist_path=memory_path)
     sessions: dict[str, SessionResult] = {}
+    active_tokens: dict[str, CancellationToken] = {}
 
     pool.start()
 
+    def _build_gateway_engine(kernel, profile: str = None, budget_cells: int = None):
+        from kerno.server.security import resolve_effective_profile
+
+        # K-012: client cannot downgrade below server policy
+        prof = resolve_effective_profile(profile, server_default=default_security, allow_downgrade=False)
+
+        req_budget = None
+        if budget_cells:
+            req_budget = ExecutionBudget(max_executions=int(budget_cells))
+
+        return make_server_engine(
+            kernel,
+            profile           = prof,
+            capability_broker = capability_broker,
+            budget            = budget or req_budget,
+            server_default    = default_security,
+            allow_downgrade   = False,
+        )
+
     # ── Routes ────────────────────────────────────────────────────────────────
+
+    @app.get("/health/live")
+    async def health_live():
+        """Public liveness probe (minimal disclosure)."""
+        return {"status": "ok"}
 
     @app.get("/health")
     async def health():
+        """Operational readiness probe."""
         return {
             "status":      "ok",
             "pool_stats":  pool.stats,
@@ -119,25 +136,42 @@ def create_app(
         from kerno.telemetry import get_metrics
         return get_metrics().snapshot()
 
+    @app.post("/sessions/{session_id}/cancel")
+    async def cancel_session(session_id: str):
+        """Cancel an actively executing session (audit #83)."""
+        token = active_tokens.get(session_id)
+        if not token:
+            return JSONResponse(
+                status_code = 404,
+                content     = {"error": f"Active session {session_id} not found or already completed"}
+            )
+        token.cancel()
+        return {"status": "cancelling", "session_id": session_id}
+
     @app.post("/run", response_model=RunResponse)
     async def run_task(request: RunRequest):
         """
-        Execute a task synchronously.
-        Returns when the task completes (or fails).
+        Execute a task synchronously through the ExecutionGateway (K-011).
         """
-        session_id = str(uuid.uuid4())
-        task_id    = "http-{}".format(session_id[:8])
+        session_id   = str(uuid.uuid4())
+        task_id      = "http-{}".format(session_id[:8])
+        cancel_token = CancellationToken()
+        active_tokens[session_id] = cancel_token
 
         kernel = pool.acquire(task_id)
         try:
             result = await asyncio.get_event_loop().run_in_executor(
                 None,
                 lambda: _execute_task(
-                    kernel      = kernel,
-                    llm         = llm,
-                    request     = request,
-                    session_id  = session_id,
-                    memory      = memory if request.memory else None,
+                    kernel            = kernel,
+                    llm               = llm,
+                    request           = request,
+                    session_id        = session_id,
+                    memory            = memory if request.memory else None,
+                    capability_broker = capability_broker,
+                    budget            = budget,
+                    cancel_token      = cancel_token,
+                    default_security  = default_security,
                 )
             )
             sessions[result.session_id] = result
@@ -158,19 +192,18 @@ def create_app(
                 error          = str(e)[:500],
             )
         finally:
+            active_tokens.pop(session_id, None)
             pool.release(task_id, reason="complete")
 
     @app.post("/stream")
     async def stream_task(request: RunRequest):
         """
-        Execute a task and stream events as Server-Sent Events.
-
-        Client usage (JavaScript):
-            const es = new EventSource('/stream?task=...');
-            es.onmessage = (e) => console.log(JSON.parse(e.data));
+        Execute a task and stream events through the ExecutionGateway (K-011).
         """
-        session_id = str(uuid.uuid4())
-        task_id    = "sse-{}".format(session_id[:8])
+        session_id   = str(uuid.uuid4())
+        task_id      = "sse-{}".format(session_id[:8])
+        cancel_token = CancellationToken()
+        active_tokens[session_id] = cancel_token
 
         async def event_generator():
             kernel = pool.acquire(task_id)
@@ -180,8 +213,10 @@ def create_app(
                 from kerno.skills.bootstrap   import bootstrap
 
                 bootstrap(kernel)
+                # K-011 / K-013: stream transport wraps kernel in server gateway engine
+                engine   = _build_gateway_engine(kernel, request.security, request.budget_cells)
                 pipeline = make_reactive(
-                    kernel    = kernel,
+                    kernel    = engine,
                     llm       = llm,
                     memory    = memory if request.memory else None,
                     max_cells = request.max_cells,
@@ -190,6 +225,8 @@ def create_app(
                 executor = StreamingExecutor(pipeline, session_id=session_id)
 
                 async for event in executor.stream(request.task):
+                    if cancel_token.is_set():
+                        break
                     yield "data: {}\n\n".format(json.dumps(event.to_dict()))
                     if event.kind == EventKind.SESSION_COMPLETE:
                         break
@@ -202,34 +239,33 @@ def create_app(
                 )
                 yield "data: {}\n\n".format(json.dumps(error_event.to_dict()))
             finally:
+                active_tokens.pop(session_id, None)
                 pool.release(task_id, reason="complete")
 
         return StreamingResponse(
             event_generator(),
             media_type = "text/event-stream",
             headers    = {
-                "Cache-Control":               "no-cache",
-                "X-Accel-Buffering":           "no",
-                "Access-Control-Allow-Origin": "*",
+                "Cache-Control":     "no-cache",
+                "X-Accel-Buffering": "no",
             },
         )
 
     @app.websocket("/ws/{session_id}")
     async def websocket_stream(ws: WebSocket, session_id: str):
         """
-        WebSocket endpoint for bidirectional streaming.
-
-        Client sends: {"task": "...", "loop": "reactive", "max_cells": 50}
-        Server sends: StreamEvent JSON objects
+        WebSocket endpoint with ExecutionGateway governance (K-011).
         """
         await ws.accept()
-        task_id = "ws-{}".format(session_id[:8])
+        task_id      = "ws-{}".format(session_id[:8])
+        cancel_token = CancellationToken()
+        active_tokens[session_id] = cancel_token
 
         try:
-            # Receive task configuration
-            data    = await ws.receive_json()
-            task    = data.get("task", "")
-            max_cells = data.get("max_cells", 50)
+            data      = await ws.receive_json()
+            task      = data.get("task", "")
+            raw_cells = data.get("max_cells", 50)
+            max_cells = min(max(1, int(raw_cells)), 100) # Server-enforced cell cap
 
             if not task:
                 await ws.send_json({"error": "task is required"})
@@ -243,8 +279,10 @@ def create_app(
                 from kerno.skills.bootstrap   import bootstrap
 
                 bootstrap(kernel)
+                # K-011: WebSocket transport wraps kernel in server gateway engine
+                engine   = _build_gateway_engine(kernel, default_security, max_cells)
                 pipeline = make_reactive(
-                    kernel    = kernel,
+                    kernel    = engine,
                     llm       = llm,
                     max_cells = max_cells,
                 )
@@ -252,6 +290,8 @@ def create_app(
                 executor = StreamingExecutor(pipeline, session_id=session_id)
 
                 async for event in executor.stream(task):
+                    if cancel_token.is_set():
+                        break
                     try:
                         await ws.send_json(event.to_dict())
                     except WebSocketDisconnect:
@@ -261,6 +301,7 @@ def create_app(
                         break
 
             finally:
+                active_tokens.pop(session_id, None)
                 pool.release(task_id, reason="complete")
 
         except WebSocketDisconnect:
@@ -327,14 +368,35 @@ def _execute_task(
     request,
     session_id: str,
     memory,
+    capability_broker: Optional[object] = None,
+    budget:            Optional[object] = None,
+    cancel_token:      Optional[object] = None,
+    default_security:  str              = "data_analysis",
 ) -> SessionResult:
-    """Execute a task synchronously in a kernel."""
+    """Execute a task synchronously in a kernel — through the choke point."""
     from kerno.loop.factory       import make_reactive, make_reflect
     from kerno.skills.bootstrap   import bootstrap
     from kerno.interfaces         import AgentState
+    from kerno.server.security    import make_server_engine
     import time
 
     bootstrap(kernel)
+
+    # K-001 / K-012: client cannot downgrade server policy
+    from kerno.server.security import resolve_effective_profile
+    prof = resolve_effective_profile(getattr(request, "security", None), server_default=default_security, allow_downgrade=False)
+
+    req_budget = None
+    req_cells = getattr(request, "budget_cells", None)
+    if req_cells:
+        from kerno.execution.budget import ExecutionBudget
+        req_budget = ExecutionBudget(max_executions=int(req_cells))
+    engine = make_server_engine(
+        kernel,
+        profile            = prof,
+        capability_broker  = capability_broker,
+        budget             = budget or req_budget,
+    )
 
     factory = {
         "reactive": make_reactive,
@@ -342,19 +404,28 @@ def _execute_task(
     }.get(request.loop, make_reactive)
 
     pipeline = factory(
-        kernel    = kernel,
+        kernel    = engine,
         llm       = llm,
         memory    = memory,
         max_cells = request.max_cells,
     )
 
+    meta = {}
+    if cancel_token is not None:
+        meta["cancel_token"] = cancel_token
+
     started = time.time()
-    state   = AgentState(task=request.task, session_id=session_id)
+    state   = AgentState(task=request.task, session_id=session_id, metadata=meta)
     final   = pipeline.run(state)
 
     from kerno.types import SessionResult, SessionStatus, Cell
+    interrupted = (
+        final.metadata.get("interrupted", False)
+        or (cancel_token is not None and getattr(cancel_token, "is_set", lambda: False)())
+    )
     status = (
-        SessionStatus.COMPLETE       if final.complete
+        SessionStatus.INTERRUPTED    if interrupted
+        else SessionStatus.COMPLETE  if final.complete
         else SessionStatus.ERROR_UNHANDLED if final.error
         else SessionStatus.MAX_CELLS
     )

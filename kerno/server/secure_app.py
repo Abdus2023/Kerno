@@ -18,12 +18,23 @@ except ImportError:
     HAS_FASTAPI = False
 
 
-from kerno.server.auth  import verify_api_key, RateLimiter
-from kerno.server.openai_compat import (
-    ChatCompletionRequest,
-    _extract_task,
-    _compile_output,
-)
+try:
+    from kerno.server.auth  import verify_api_key, RateLimiter
+except ImportError:
+    # fastapi not installed → auth helpers are unavailable.
+    # create_secure_app() raises a clear error below when called.
+    verify_api_key = None
+    RateLimiter    = None
+try:
+    from kerno.server.openai_compat import (
+        ChatCompletionRequest,
+        _extract_task,
+        _compile_output,
+    )
+except ImportError:
+    ChatCompletionRequest = None
+    _extract_task         = None
+    _compile_output       = None
 
 
 def create_secure_app(
@@ -31,6 +42,7 @@ def create_secure_app(
     pool_size:    int = 3,
     skills_path:  Optional[str] = None,
     enable_auth:  bool = True,
+    default_security: str = "data_analysis",
 ) -> "FastAPI":
     """
     Create a production-ready server.
@@ -41,6 +53,8 @@ def create_secure_app(
         pool_size:    Kernel pool size.
         skills_path:  Path to skills file.
         enable_auth:  Enable API key authentication.
+        default_security: Allowlist profile for every session (the
+                          authenticated server defaults to data_analysis).
     """
     if not HAS_FASTAPI:
         raise ImportError("pip install fastapi uvicorn")
@@ -106,8 +120,15 @@ def create_secure_app(
             from kerno.loop.factory       import make_reactive, make_reflect
             from kerno.interfaces         import AgentState
             from kerno.server.files       import FileMaterializer
+            from kerno.server.security    import make_server_engine
 
             bootstrap(kernel)
+            # K-001: the authenticated server never executes raw kernel
+            # code — every session goes through the choke point.
+            engine = make_server_engine(
+                kernel,
+                profile = getattr(request, "security", default_security),
+            )
 
             # File handling
             body = request.dict()
@@ -118,7 +139,7 @@ def create_secure_app(
                 task += "\n\n" + mat.build_context_message(files)
 
             factory  = make_reflect if request.loop == "reflect" else make_reactive
-            pipeline = factory(kernel=kernel, llm=llm, max_cells=max_cells)
+            pipeline = factory(kernel=engine, llm=llm, max_cells=max_cells)
 
             if request.stream:
                 from kerno.streaming.executor import StreamingExecutor

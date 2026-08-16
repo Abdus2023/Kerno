@@ -46,15 +46,19 @@ if HAS_FASTAPI:
         # Kerno-specific extensions (ignored by standard clients)
         loop:        str                        = "reactive"
         max_cells:   int                        = 50
+        security:    str                        = "permissive"  # "none" opts out
 
 
 def create_openai_app(
     llm,
     *,
-    pool_size:    int  = 3,
-    skills_path:  Optional[str] = None,
-    model_id:     str  = "kerno-1",
-    model_name:   str  = "Kerno Kernel Agent",
+    pool_size:         int  = 3,
+    skills_path:       Optional[str] = None,
+    model_id:          str  = "kerno-1",
+    model_name:        str  = "Kerno Kernel Agent",
+    capability_broker: Optional[object] = None,
+    budget:            Optional[object] = None,
+    default_security:  str  = "data_analysis",
 ) -> "FastAPI":
     """
     Create an OpenAI-compatible FastAPI application.
@@ -71,6 +75,9 @@ def create_openai_app(
         skills_path: Path to extra skills
         model_id:    Model ID shown in Open WebUI dropdown
         model_name:  Display name in Open WebUI
+        capability_broker: CapabilityBroker (K-008) for every session
+        budget:       ExecutionBudget (audit #85) for every session
+        default_security: allowlist profile when the request omits it
     """
     if not HAS_FASTAPI:
         raise ImportError("pip install fastapi uvicorn")
@@ -86,17 +93,22 @@ def create_openai_app(
     app.add_middleware(
         CORSMiddleware,
         allow_origins  = ["*"],
+        allow_credentials = False,
         allow_methods  = ["*"],
         allow_headers  = ["*"],
     )
 
-    # ── Health check (not OpenAI standard, but useful) ───────────────────────
+    # ── Health check ─────────────────────────────────────────────────────────
+
+    @app.get("/health/live")
+    async def health_live():
+        return {"status": "ok"}
 
     @app.get("/health")
     async def health():
         return {
             "status":      "ok",
-            "pool_stats":  pool.stats(),
+            "pool_stats":  pool.stats,     # KernelPool.stats is a property
             "timestamp":   time.time(),
         }
 
@@ -158,11 +170,22 @@ def create_openai_app(
                 from kerno.loop.factory import make_reactive, make_reflect
                 from kerno.interfaces   import AgentState
                 from kerno.skills.bootstrap import bootstrap
+                from kerno.server.security  import make_server_engine
 
                 bootstrap(kernel)
+                # K-001 / K-012: client cannot downgrade below server policy
+                prof = getattr(request, "security", default_security) or default_security
+                if prof == "none":
+                    prof = default_security
+                engine = make_server_engine(
+                    kernel,
+                    profile            = prof,
+                    capability_broker  = capability_broker,
+                    budget             = budget,
+                )
                 factory  = make_reflect if request.loop == "reflect" else make_reactive
                 pipeline = factory(
-                    kernel    = kernel,
+                    kernel    = engine,
                     llm       = llm,
                     max_cells = request.max_cells,
                 )
@@ -206,14 +229,25 @@ def create_openai_app(
         from kerno.streaming.protocol import EventKind
         from kerno.loop.factory       import make_reactive, make_reflect
         from kerno.skills.bootstrap   import bootstrap
+        from kerno.server.security    import make_server_engine
 
         kernel = pool.acquire(task_id)
 
         try:
             bootstrap(kernel)
+            # K-001 / K-012: client cannot downgrade below server policy
+            prof = getattr(request, "security", default_security) or default_security
+            if prof == "none":
+                prof = default_security
+            engine = make_server_engine(
+                kernel,
+                profile            = prof,
+                capability_broker  = capability_broker,
+                budget             = budget,
+            )
             factory  = make_reflect if request.loop == "reflect" else make_reactive
             pipeline = factory(
-                kernel    = kernel,
+                kernel    = engine,
                 llm       = llm,
                 max_cells = request.max_cells,
             )

@@ -1,0 +1,73 @@
+# docker-compose.security.yml
+# Hardened Kerno Sandboxed Kernel Deployment (Invariant K-003)
+#
+# Threat Model & Invariants:
+#   K-001: Execution Engine choke point on all agent paths
+#   K-003: Kernel OS-level isolation for untrusted workloads
+#   K-008: Capability Broker authorization
+#
+# This compose file runs the Kerno worker substrate inside a hardened
+# Linux containment boundary:
+#   - Dropped Linux capabilities (cap_drop: ALL)
+#   - Read-only root filesystem (read_only: true)
+#   - Network isolation (network_mode: none for worker kernels)
+#   - Explicit resource limits (pids_limit, mem_limit, cpus)
+#   - Tmpfs for ephemeral scratch spaces only
+
+version: "3.8"
+
+services:
+
+  # ── Secure Control Plane (API & Orchestrator) ──────────────────────────────
+  kerno-control:
+    build:
+      context: .
+      dockerfile: Dockerfile.kerno
+    ports:
+      - "8001:8001"
+    environment:
+      - KERNO_RUNTIME_MODE=live
+      - KERNO_RUNTIME_ISOLATION=docker
+      - KERNO_RUNTIME_SECURITY=data_analysis
+      - KERNO_ENABLE_AUTH=true
+      - KERNO_API_KEYS=${KERNO_API_KEYS:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - KERNO_POOL_SIZE=${KERNO_POOL_SIZE:-3}
+      - KERNO_MAX_CELLS=${KERNO_MAX_CELLS:-50}
+    volumes:
+      - kerno_sessions:/sessions
+      - ./skills:/skills:ro
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 4G
+    restart: unless-stopped
+
+  # ── Hardened Sandbox Kernel Template (Worker Data Plane) ───────────────────
+  kerno-sandbox-worker:
+    image: python:3.11-slim
+    command: ["python", "-m", "ipykernel_launcher", "-f", "/tmp/kernel.json"]
+    network_mode: none               # Strict network isolation: no egress / no ingress
+    read_only: true                  # Immutable root filesystem
+    cap_drop:
+      - ALL                          # Drop all Linux privileges
+    security_opt:
+      - no-new-privileges:true       # Prevent privilege escalation
+    mem_limit: 512m                  # Enforced in standalone Compose mode
+    cpus: 1.0
+    pids_limit: 64                   # Guard against fork-bombs
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m
+      - /run:rw,noexec,nosuid,size=32m
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+          pids: 64                   # Guard against fork-bombs in Swarm mode
+
+volumes:
+  kerno_sessions:

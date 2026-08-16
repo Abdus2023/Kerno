@@ -148,12 +148,17 @@ class SkillRegistry:
         Returns:
             Public names discovered in the code string.
         """
-        output = kernel.execute(code, silent=True, timeout=30)
+        # Long timeout + one retry: skill modules import pandas/numpy/
+        # matplotlib, which can exceed 30s under load (observed flake).
+        output = kernel.execute(code, silent=True, timeout=120)
         if output.has_error:
-            raise RuntimeError(
-                f"Skill '{name}' failed to load: "
-                f"{output.error.ename}: {output.error.evalue}"
-            )
+            if output.error.ename == "TimeoutError":
+                output = kernel.execute(code, silent=True, timeout=120)
+            if output.has_error:
+                raise RuntimeError(
+                    f"Skill '{name}' failed to load: "
+                    f"{output.error.ename}: {output.error.evalue}"
+                )
 
         code_hash = hashlib.sha256(code.encode()).hexdigest()[:12]
         discovered = self._discover_names(kernel, code)

@@ -53,30 +53,44 @@ class KernoREPL:
     def __init__(
         self,
         llm,
-        loop:       str  = "reactive",
-        max_cells:  int  = 20,
-        verbose:    bool = True,
+        loop:              str                      = "reactive",
+        max_cells:         int                      = 20,
+        allowlist:         Optional[object]         = None,
+        capability_broker: Optional[object]         = None,
+        verbose:           bool                     = True,
     ):
-        self.llm       = llm
-        self.loop      = loop
-        self.max_cells = max_cells
-        self.verbose   = verbose
+        self.llm               = llm
+        self.loop              = loop
+        self.max_cells         = max_cells
+        self.allowlist         = allowlist
+        self.capability_broker = capability_broker
+        self.verbose           = verbose
 
-        self._kernel   = None
+        self._kernel           = None
+        self._engine           = None
         self._history:  list[tuple[str, str]] = []   # (task, summary)
         self._running   = False
 
     def start(self) -> None:
         """Start the interactive REPL."""
-        from kerno.kernel.runtime  import KernelRuntime
-        from kerno.skills.bootstrap import bootstrap
+        from kerno.kernel.runtime   import KernelRuntime
+        from kerno.skills.bootstrap  import bootstrap
+        from kerno.execution.engine import ExecutionEngine
 
         print(self.BANNER)
 
         self._kernel = KernelRuntime()
         self._kernel.start()
         bootstrap(self._kernel)
-        print("✓ Kernel ready. Default skills loaded.\n")
+
+        # K-001: REPL execution goes through the ExecutionEngine choke point
+        self._engine = ExecutionEngine(
+            self._kernel,
+            allowlist            = self.allowlist,
+            broker               = self.capability_broker,
+            default_capabilities = frozenset({"kernel.execute"}) if self.capability_broker else frozenset(),
+        )
+        print("✓ Kernel ready. Execution engine active. Default skills loaded.\n")
 
         self._running = True
 
@@ -132,7 +146,7 @@ class KernoREPL:
 
         factory = make_reflect if self.loop == "reflect" else make_reactive
         pipeline = factory(
-            kernel    = self._kernel,
+            kernel    = self._engine or self._kernel,
             llm       = self.llm,
             max_cells = self.max_cells,
         )

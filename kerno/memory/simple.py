@@ -110,6 +110,9 @@ class SimpleMemoryStore(MemoryStore):
         scored.sort(key=lambda e: e.score, reverse=True)
         return scored[:k]
 
+    def __len__(self) -> int:
+        return len(self._entries)
+
     def list(
         self,
         kind:       Optional[str] = None,

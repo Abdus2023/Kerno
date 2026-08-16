@@ -76,6 +76,20 @@ class SecurityConfig:
 
 
 @dataclass
+class RuntimeConfig:
+    """Runtime execution settings (the deep-audit runtime contracts)."""
+
+    mode:            str   = "live"          # "live" | "dry_run" (audit #91)
+    isolation:       str   = "shared"        # multi-agent: "shared" | "isolated" (K-009)
+    auto_restart:    bool  = False           # K-004 kernel-death recovery
+    budget_executions: Optional[int] = None  # ExecutionBudget (audit #85)
+    budget_wall_time:  Optional[float] = None
+    budget_output:     Optional[int] = None
+    model_name:      str   = ""              # reproducibility manifest (audit #57)
+    timeout_policy:  str   = "interrupt"     # "interrupt" | "escalate" (audit #84)
+
+
+@dataclass
 class TelemetryConfig:
     """Telemetry settings."""
     enabled:      bool  = True
@@ -103,6 +117,7 @@ class KernoConfig:
     llm:        LLMConfig       = field(default_factory=LLMConfig)
     memory:     MemoryConfig    = field(default_factory=MemoryConfig)
     security:   SecurityConfig  = field(default_factory=SecurityConfig)
+    runtime:    RuntimeConfig   = field(default_factory=RuntimeConfig)
     telemetry:  TelemetryConfig = field(default_factory=TelemetryConfig)
     output:     OutputConfig    = field(default_factory=OutputConfig)
 
@@ -150,6 +165,16 @@ class KernoConfig:
             # Security
             "KERNO_SECURITY_PROFILE":               ("security", "profile",         str),
             "KERNO_SECURITY_SANITIZE_INPUTS":       ("security", "sanitize_inputs", _parse_bool),
+
+            # Runtime
+            "KERNO_RUNTIME_MODE":                   ("runtime", "mode",            str),
+            "KERNO_RUNTIME_ISOLATION":              ("runtime", "isolation",       str),
+            "KERNO_RUNTIME_AUTO_RESTART":           ("runtime", "auto_restart",    _parse_bool),
+            "KERNO_RUNTIME_BUDGET_EXECUTIONS":      ("runtime", "budget_executions", _parse_int_or_none),
+            "KERNO_RUNTIME_BUDGET_WALL_TIME":       ("runtime", "budget_wall_time",  _parse_float_or_none),
+            "KERNO_RUNTIME_BUDGET_OUTPUT":          ("runtime", "budget_output",    _parse_int_or_none),
+            "KERNO_RUNTIME_MODEL_NAME":             ("runtime", "model_name",      str),
+            "KERNO_RUNTIME_TIMEOUT_POLICY":         ("runtime", "timeout_policy",  str),
 
             # Telemetry
             "KERNO_TELEMETRY_ENABLED":              ("telemetry", "enabled",      _parse_bool),
@@ -205,9 +230,78 @@ class KernoConfig:
             kernel   = KernelConfig(max_cells=100, pool_size=5),
             memory   = MemoryConfig(enabled=True),
             security = SecurityConfig(profile="data_analysis", sanitize_inputs=True),
+            runtime  = RuntimeConfig(
+                auto_restart=True, isolation="isolated",
+                budget_executions=200, timeout_policy="escalate",
+            ),
             telemetry= TelemetryConfig(enabled=True),
             output   = OutputConfig(save_notebook=True),
         )
+
+    # ── Validation ─────────────────────────────────────────────────────────────
+
+    def validate(self) -> list[str]:
+        """
+        Validate configuration values; returns a list of problems (empty
+        when valid). Invalid values are reported, not silently coerced.
+        """
+        problems: list[str] = []
+
+        if self.runtime.mode not in ("live", "dry_run"):
+            problems.append(
+                "runtime.mode must be 'live' or 'dry_run', got {!r}".format(
+                    self.runtime.mode
+                )
+            )
+        if self.runtime.isolation not in ("shared", "isolated"):
+            problems.append(
+                "runtime.isolation must be 'shared' or 'isolated', got {!r}".format(
+                    self.runtime.isolation
+                )
+            )
+        if self.runtime.timeout_policy not in ("interrupt", "escalate"):
+            problems.append(
+                "runtime.timeout_policy must be 'interrupt' or 'escalate', "
+                "got {!r}".format(self.runtime.timeout_policy)
+            )
+        if self.security.profile not in (
+            "none", "permissive", "data_analysis", "read_only",
+        ):
+            problems.append(
+                "security.profile must be one of none/permissive/"
+                "data_analysis/read_only, got {!r}".format(
+                    self.security.profile
+                )
+            )
+        for name, limit in (
+            ("runtime.budget_executions", self.runtime.budget_executions),
+            ("runtime.budget_output",     self.runtime.budget_output),
+        ):
+            if limit is not None and limit < 0:
+                problems.append("{} must be >= 0, got {!r}".format(name, limit))
+        if (
+            self.runtime.budget_wall_time is not None
+            and self.runtime.budget_wall_time < 0
+        ):
+            problems.append(
+                "runtime.budget_wall_time must be >= 0, got {!r}".format(
+                    self.runtime.budget_wall_time
+                )
+            )
+        if self.kernel.max_cells < 1:
+            problems.append(
+                "kernel.max_cells must be >= 1, got {!r}".format(
+                    self.kernel.max_cells
+                )
+            )
+        return problems
+
+    def validate_or_raise(self) -> "KernoConfig":
+        """Validate and raise ValueError on the first problem."""
+        problems = self.validate()
+        if problems:
+            raise ValueError("invalid KernoConfig: " + "; ".join(problems))
+        return self
 
     # ── Serialization ──────────────────────────────────────────────────────────
 
@@ -217,6 +311,7 @@ class KernoConfig:
             "llm":       asdict(self.llm),
             "memory":    asdict(self.memory),
             "security":  asdict(self.security),
+            "runtime":   asdict(self.runtime),
             "telemetry": asdict(self.telemetry),
             "output":    asdict(self.output),
         }
@@ -238,3 +333,15 @@ class KernoConfig:
 
 def _parse_bool(value: str) -> bool:
     return value.lower() in ("true", "1", "yes", "on")
+
+
+def _parse_int_or_none(value: str):
+    if value is None or str(value).strip().lower() in ("", "none", "null"):
+        return None
+    return int(value)
+
+
+def _parse_float_or_none(value: str):
+    if value is None or str(value).strip().lower() in ("", "none", "null"):
+        return None
+    return float(value)

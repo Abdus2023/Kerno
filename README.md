@@ -22,20 +22,33 @@ The only missing piece is the decision-making loop — which is exactly what an 
 
 ## Installation
 
+Kerno is split into a **lean core** plus **optional packs** (audit #16):
+the runtime itself needs only the Jupyter kernel stack — the analytical
+ecosystem (pandas, numpy, matplotlib, sklearn, …) runs *inside* the
+kernel and is installed on demand. Skills whose dependencies are missing
+are skipped with a warning instead of failing the session.
+
 ```bash
+# Lean core: kernel runtime, agent loops, engine, security, CLI
 pip install kerno
 
-# With Anthropic
-pip install "kerno[anthropic]"
+# Analytical data stack (data/viz/ML/stats skills in the kernel)
+pip install "kerno[data]"
 
-# With OpenAI
+# HTTP / OpenAI-compatible server surfaces
+pip install "kerno[server]"
+
+# LLM providers
+pip install "kerno[anthropic]"
 pip install "kerno[openai]"
 
-# Optional skill packs
+# Skill-pack extras
 pip install "kerno[timeseries]"   # statsmodels decomposition/forecasting
 pip install "kerno[nlp]"          # NLTK sentiment
 pip install "kerno[graphs]"       # networkx analysis
 pip install "kerno[documents]"    # PDF / DOCX parsing
+pip install "kerno[sql]"          # SQLAlchemy
+pip install "kerno[security]"     # psutil (memory metrics)
 
 # Full stack
 pip install "kerno[all]"
@@ -219,6 +232,62 @@ result = run(
 
 Profiles: `AllowList.permissive()` | `AllowList.data_analysis()` | `AllowList.read_only()`
 
+
+### Runtime architecture & security model
+
+Kerno implements the deep-audit runtime contracts (`docs/kerno-deep-audit.md`,
+tracked in `docs/implementation-status.md`; the full security audit lives
+in [`kerno-security-audit/`](kerno-security-audit/README.md)):
+
+**One execution choke point (K-001)** — every agent cell, in every loop
+strategy, passes through `ExecutionEngine`: authorization → policy →
+execution → audit record → event stream.
+
+```python
+from kerno import (
+    ExecutionEngine, CapabilityBroker, Capability, CAP_KERNEL_EXECUTE,
+    ExecutionBudget, AllowList,
+)
+
+broker = CapabilityBroker()
+broker.grant(Capability(CAP_KERNEL_EXECUTE), subject="agent-1")
+
+engine = ExecutionEngine(
+    kernel,
+    allowlist            = AllowList.data_analysis(),   # policy layer
+    broker               = broker,                       # K-008 grants
+    default_capabilities = frozenset({CAP_KERNEL_EXECUTE}),
+    redactor             = secret_broker.redact,         # audit #68
+    effect_ledger        = ledger,                       # audit #93
+    approval_gate        = gate,                         # audit #90
+)
+```
+
+**Key capabilities** (each backed by tests that fail on the pre-fix code):
+
+- **Authorization (K-008)** — capability grants with scopes, subjects,
+  expiry, revocation, and attenuation (child ⊆ parent, P6). Agents are
+  security principals: grants are scoped per agent name.
+- **Event stream** — immutable, causally-linked `ExecutionEvent`s with
+  monotonic sequence numbers; `ExecutionRecord`s keyed by `execution_id`.
+- **Actions (P10)** — `Action` + `ActionStateMachine` with exactly one
+  terminal outcome; idempotency-aware retries (audit #50).
+- **Isolation** — `isolation="isolated"` multi-agent runs each agent in a
+  fresh kernel with explicit `SharedMemory` + `AgentBus` (K-009); or
+  OS-level `DockerExecutor` with cpus/memory/network/read-only limits.
+- **Recovery (K-004)** — kernel crash ≠ agent crash: `auto_restart`
+  restores state from history; `resume_session()` continues on a fresh
+  kernel; `FaultInjector` + P1–P10 invariant checks verify it.
+- **Reproducibility** — manifests (env snapshot, input/artifact hashes,
+  model, seeds), environment locks, and the notebook as a content-addressed
+  artifact with per-cell execution metadata.
+
+**Verify locally** (K-010: test presence is only evidence when CI runs):
+
+```bash
+make ci        # same gates as .github/workflows/ci.yml
+```
+
 ---
 
 ## Parallel Execution
@@ -283,16 +352,24 @@ KERNO_OUTPUT_SAVE_NOTEBOOK=true
 # Run a task
 kerno run "Analyze data.csv" --loop reflect --save-notebook
 
-# List past sessions    
+# Runtime controls
+kerno run "Analyze" --dry-run                 # validate without a kernel
+kerno run "Analyze" --budget 50               # cap cell executions
+kerno run "Analyze" --auto-restart            # survive kernel crashes (K-004)
+
+# Resume / fork saved sessions
+kerno resume sessions/20240127_*.ipynb --security data_analysis
+kerno fork  sessions/20240127_*.ipynb --at-cell 10
+
+# Sessions
 kerno session list
+kerno session show <id>
+kerno session export <id> --out session.json   # JSON for replay/audit
 
-# Search memory
+# Memory / config / diagnostics
 kerno memory search "churn prediction"
-
-# Environment check
-kerno doctor
-
-# Show metrics
+kerno config show
+kerno doctor            # env + runtime invariant checks (P1-P10)
 kerno metrics
 ```
 
@@ -369,6 +446,32 @@ kerno/
 ├── plugins/         PluginRegistry, BasePlugin, built-in plugins
 └── cli/             kerno run / session / memory / config / doctor
 ```
+
+---
+
+## Examples
+
+Every example runs with a real LLM unless noted; the last three run
+with **no API key** (deterministic `ScriptedBrain`):
+
+| # | File | Shows |
+|---|------|-------|
+| 01 | `examples/01_basic.py` | The simplest possible run |
+| 02 | `examples/02_reflect_with_notebook.py` | Reflect loop + notebook save |
+| 03 | `examples/03_plan_execute.py` | Plan → execute → verify |
+| 04 | `examples/04_hierarchical.py` | Planner + executor LLMs |
+| 05 | `examples/05_parallel.py` | `run_with_pool` over a kernel pool |
+| 06 | `examples/06_with_config.py` | `KernoConfig` + `run_with_config` |
+| 07 | `examples/07_with_memory.py` | Cross-session memory |
+| 08 | `examples/08_multi_agent_review.py` | Analyst → critic → narrator |
+| 09 | `examples/09_resume_notebook.py` | Continue from a saved notebook |
+| 10 | `examples/10_with_comms.py` | Structured kernel comms |
+| 11–12 | `examples/11_composable.py`, `12_advanced_composition.py` | Pipeline composition |
+| 13 | `examples/13_program_scale.py` | ProgramAgent + persistence |
+| 14 | `examples/14_enriched_skills.py` | Enriched skill library |
+| 15 | `examples/15_secure_runtime.py` | Choke point + broker + budget — **no API key** |
+| 16 | `examples/16_dry_run_and_replay.py` | Dry-run, live, replay, persist — **no API key** |
+| 17 | `examples/17_runtime_tour.py` | Checkpoints, cancel, fork, distributed — **no API key** |
 
 ---
 

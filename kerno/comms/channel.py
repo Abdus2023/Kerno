@@ -17,12 +17,11 @@ This enables:
 from __future__ import annotations
 
 import json
-import queue
-import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
+from kerno.kernel.output import set_comm_handler
 from kerno.kernel.runtime import KernelRuntime
 from kerno.telemetry.logger import get_logger
 
@@ -194,24 +193,27 @@ class KernoComm:
         self._handlers: dict[str, list[CommHandler]] = {}
         self._messages: list[CommMessage]            = []
         self._running   = False
-        self._thread:   Optional[threading.Thread]   = None
 
     def start(self) -> "KernoComm":
-        """Install comm infrastructure in kernel and start listening."""
+        """
+        Install comm infrastructure in kernel and start listening.
+
+        Delivery model: the output collector (kerno.kernel.output) is the
+        single reader of the IOPUB socket; comm_msg messages are dispatched
+        to this channel inline while a cell is being collected. This avoids
+        a competing reader thread stealing execution messages (including
+        the terminal "idle"), which previously hung cell collection.
+        """
         self.kernel.execute(_COMM_SETUP_CODE, silent=True, timeout=10)
         self._running = True
-        self._thread  = threading.Thread(
-            target = self._listen_loop,
-            daemon = True,
-            name   = "kerno-comm-listener",
-        )
-        self._thread.start()
+        set_comm_handler(self._on_comm_msg)
         log.info("KernoComm started")
         return self
 
     def stop(self) -> None:
-        """Stop the listener thread."""
+        """Unregister the dispatcher and stop listening."""
         self._running = False
+        set_comm_handler(None)
         log.info("KernoComm stopped")
 
     def on(self, kind: str, handler: CommHandler) -> "KernoComm":
@@ -240,36 +242,24 @@ class KernoComm:
 
     # ── Internals ─────────────────────────────────────────────────────────────
 
-    def _listen_loop(self) -> None:
+    def _on_comm_msg(self, msg: dict) -> None:
         """
-        Listen on the IOPUB channel for comm_msg messages.
-        Dispatches to registered handlers.
+        Handle a comm_msg received by the output collector.
+
+        Called inline during cell collection (single-reader discipline).
         """
-        kc = self.kernel._kc
-        if kc is None:
+        if not self._running:
             return
-
-        while self._running:
-            try:
-                msg = kc.get_iopub_msg(timeout=0.5)
-            except queue.Empty:
-                continue
-            except Exception:
-                break
-
-            if msg.get("msg_type") != "comm_msg":
-                continue
-
-            try:
-                data = msg["content"].get("data", {})
-                comm_msg = CommMessage(
-                    kind    = data.get("kind", "unknown"),
-                    payload = data.get("payload", {}),
-                )
-                self._messages.append(comm_msg)
-                self._dispatch(comm_msg)
-            except Exception as e:
-                log.warning("Comm message parse error", error=str(e))
+        try:
+            data = msg["content"].get("data", {})
+            comm_msg = CommMessage(
+                kind    = data.get("kind", "unknown"),
+                payload = data.get("payload", {}),
+            )
+            self._messages.append(comm_msg)
+            self._dispatch(comm_msg)
+        except Exception as e:
+            log.warning("Comm message parse error", error=str(e))
 
     def _dispatch(self, msg: CommMessage) -> None:
         """Call all registered handlers for this message kind."""

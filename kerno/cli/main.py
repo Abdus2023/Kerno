@@ -98,6 +98,83 @@ def main() -> int:
         default = "none",
         help    = "Security allowlist profile",
     )
+    run_p.add_argument(
+        "--dry-run",
+        action  = "store_true",
+        default = False,
+        help    = "Validate the session without starting a kernel (audit #91)",
+    )
+    run_p.add_argument(
+        "--budget",
+        type    = int,
+        default = None,
+        metavar = "CELLS",
+        help    = "Cap total cell executions for the session (audit #85)",
+    )
+    run_p.add_argument(
+        "--isolation",
+        choices = ["shared", "isolated"],
+        default = None,
+        help    = "Multi-agent isolation mode (K-009)",
+    )
+    run_p.add_argument(
+        "--auto-restart",
+        action  = "store_true",
+        default = False,
+        help    = "Restart + restore state when the kernel dies (K-004)",
+    )
+
+    # ── resume / fork ─────────────────────────────────────────────────────────
+    resume_p = sub.add_parser("resume", help="Resume a session from a notebook")
+    resume_p.add_argument("notebook", help="Path to the saved .ipynb session")
+    resume_p.add_argument(
+        "--task", default=None,
+        help="Override the task for the continuation",
+    )
+    resume_p.add_argument(
+        "--loop", "-l", default="reactive",
+        choices=["reactive", "reflect", "plan"],
+        help="Loop strategy (default: reactive)",
+    )
+    resume_p.add_argument(
+        "--max-cells", "-n", type=int, default=50,
+        help="Max new cells to generate",
+    )
+    resume_p.add_argument(
+        "--security",
+        choices=["none", "permissive", "data_analysis", "read_only"],
+        default="permissive",
+        help="Security allowlist profile (default: permissive)",
+    )
+    resume_p.add_argument(
+        "--verbose", "-v", action="store_true", default=False,
+        help="Print execution trace",
+    )
+
+    fork_p = sub.add_parser("fork", help="Fork a session at a cell boundary")
+    fork_p.add_argument("notebook", help="Path to the saved .ipynb session")
+    fork_p.add_argument(
+        "--at-cell", type=int, required=True,
+        help="Cell boundary to fork at (1-based)",
+    )
+    fork_p.add_argument(
+        "--task", default=None,
+        help="Override the task for the branch",
+    )
+    fork_p.add_argument(
+        "--security",
+        choices=["none", "permissive", "data_analysis", "read_only"],
+        default="permissive",
+        help="Security allowlist profile (default: permissive)",
+    )
+    fork_p.add_argument(
+        "--max-cells", "-n", type=int, default=50,
+        help="Max new cells for the branch",
+    )
+    fork_p.add_argument(
+        "--verbose", "-v", action="store_true", default=False,
+        help="Print execution trace",
+    )
 
     # ── session ───────────────────────────────────────────────────────────────
     sess_p = sub.add_parser("session", help="Inspect past sessions")
@@ -114,6 +191,14 @@ def main() -> int:
     )
 
     sess_show_p = sess_sub.add_parser("show", help="Show a session notebook")
+    sess_export_p = sess_sub.add_parser(
+        "export", help="Export a session as JSON (replay/resume/audit)"
+    )
+    sess_export_p.add_argument("session_id", help="Session ID to export")
+    sess_export_p.add_argument(
+        "--out", "-o", default=None,
+        help="Output path (default: sessions/<session_id>.json)",
+    )
     sess_show_p.add_argument("path", help="Path to .ipynb file")
 
     # ── memory ────────────────────────────────────────────────────────────────
@@ -243,6 +328,16 @@ def main() -> int:
         help    = "Save report to JSON file",
     )
 
+    # ── verify-env ────────────────────────────────────────────────────────────
+    verify_p = sub.add_parser(
+        "verify-env", help="Verify environment against a reproducibility manifest"
+    )
+    verify_p.add_argument("manifest", help="Path to <session_id>.manifest.json")
+    verify_p.add_argument(
+        "--strict", action="store_true", default=False,
+        help="Enforce strict package version matching",
+    )
+
     # ── Parse ─────────────────────────────────────────────────────────────────
     args = parser.parse_args()
 
@@ -256,15 +351,18 @@ def main() -> int:
 
     # Dispatch
     handlers = {
-        "run":     cmd_run,
-        "session": cmd_session,
-        "memory":  cmd_memory,
-        "config":  cmd_config,
-        "doctor":  cmd_doctor,
-        "metrics": cmd_metrics,
-        "repl":    cmd_repl,
-        "serve":   cmd_serve,
-        "bench":   cmd_bench,
+        "run":        cmd_run,
+        "resume":     cmd_resume,
+        "fork":       cmd_fork,
+        "session":    cmd_session,
+        "memory":     cmd_memory,
+        "config":     cmd_config,
+        "doctor":     cmd_doctor,
+        "metrics":    cmd_metrics,
+        "repl":       cmd_repl,
+        "serve":      cmd_serve,
+        "bench":      cmd_bench,
+        "verify-env": cmd_verify_env,
     }
 
     handler = handlers.get(args.command)
@@ -295,6 +393,14 @@ def cmd_run(args, config) -> int:
         config.memory.enabled = True
     if args.security != "none":
         config.security.profile = args.security
+    if args.dry_run:
+        config.runtime.mode = "dry_run"
+    if args.budget:
+        config.runtime.budget_executions = args.budget
+    if args.isolation:
+        config.runtime.isolation = args.isolation
+    if args.auto_restart:
+        config.runtime.auto_restart = True
 
     # Build LLM
     llm = build_llm(
@@ -302,6 +408,20 @@ def cmd_run(args, config) -> int:
         model    = args.model or config.llm.model,
         config   = config,
     )
+
+    if args.dry_run and _no_api_key_configured():
+        # Audit #91: dry-run validates the pipeline (loops, policy,
+        # cells) without executing — no real model is needed. The
+        # anthropic/openai clients construct lazily without a key, so
+        # detect the missing key explicitly instead of failing on the
+        # first real call.
+        from kerno.llm.brain import ScriptedBrain
+        llm = ScriptedBrain(
+            "print('dry run validation cell')",
+            "# TASK_COMPLETE: done",
+        )
+        print("ℹ️  No API key — using a deterministic ScriptedBrain for "
+              "dry-run validation (no kernel will be started).")
 
     if llm is None:
         print("❌ Could not build LLM. Check your API key.", file=sys.stderr)
@@ -341,6 +461,83 @@ def cmd_run(args, config) -> int:
     return 0 if result.status.name == "COMPLETE" else 1
 
 
+def cmd_resume(args, config) -> int:
+    """Execute: kerno resume <notebook> — continue a saved session."""
+    from kerno.session import resume_from_notebook
+    from kerno.security.allowlist import AllowList
+
+    if args.verbose:
+        print(f"Resuming session from: {args.notebook}")
+
+    allowlist = None
+    if args.security != "none":
+        allowlist = {
+            "permissive":    AllowList.permissive,
+            "data_analysis": AllowList.data_analysis,
+            "read_only":     AllowList.read_only,
+        }.get(args.security, AllowList.permissive)()
+
+    llm = build_llm(args.provider if hasattr(args, "provider") else "anthropic",
+                    args.model if hasattr(args, "model") else None, config)
+    if llm is None:
+        print("❌ Could not build LLM. Check your API key.", file=sys.stderr)
+        return 1
+
+    result = resume_from_notebook(
+        args.notebook,
+        llm,
+        new_task   = args.task,
+        loop       = args.loop,
+        allowlist  = allowlist,
+        max_cells  = args.max_cells,
+        verbose    = args.verbose,
+    )
+    print("─" * 56)
+    print(f"{'✅' if result.status.name == 'COMPLETE' else '⏱️'} {result.status.name}")
+    print(f"   Cells: {result.cells_executed}")
+    return 0 if result.status.name == "COMPLETE" else 1
+
+
+def cmd_fork(args, config) -> int:
+    """Execute: kerno fork <notebook> --at-cell N — branch a session."""
+    from kerno.session import fork_session
+    from kerno.security.allowlist import AllowList
+
+    if args.verbose:
+        print(f"Forking session at cell {args.at_cell}: {args.notebook}")
+
+    allowlist = None
+    if args.security != "none":
+        allowlist = {
+            "permissive":    AllowList.permissive,
+            "data_analysis": AllowList.data_analysis,
+            "read_only":     AllowList.read_only,
+        }.get(args.security, AllowList.permissive)()
+
+    llm = build_llm(args.provider if hasattr(args, "provider") else "anthropic",
+                    args.model if hasattr(args, "model") else None, config)
+    if llm is None:
+        print("❌ Could not build LLM. Check your API key.", file=sys.stderr)
+        return 1
+
+    from kerno.session import session_from_dict
+    import json
+    from pathlib import Path
+    data = json.loads(Path(args.notebook).read_text())
+    result = fork_session(
+        session_from_dict(data),
+        llm,
+        up_to_cell = args.at_cell,
+        allowlist  = allowlist,
+        max_cells  = args.max_cells,
+        verbose    = args.verbose,
+    )
+    print("─" * 56)
+    print(f"{'✅' if result.status.name == 'COMPLETE' else '⏱️'} {result.status.name}")
+    print(f"   Cells: {result.cells_executed}")
+    return 0 if result.status.name == "COMPLETE" else 1
+
+
 def cmd_session(args, config) -> int:
     """Execute: kerno session [list|show]"""
     cmd = getattr(args, "session_cmd", None)
@@ -349,9 +546,53 @@ def cmd_session(args, config) -> int:
         return session_list(args)
     elif cmd == "show":
         return session_show(args)
+    elif cmd == "export":
+        return session_export(args)
     else:
-        print("Usage: kerno session [list|show]")
+        print("Usage: kerno session [list|show|export]")
         return 1
+
+
+def session_export(args) -> int:
+    """Execute: kerno session export <session_id> [--out PATH]"""
+    from kerno.session import save_session
+
+    session_id = getattr(args, "session_id", "")
+    out_path   = getattr(args, "out", None) or (
+        "sessions/{}.json".format(session_id)
+    )
+
+    # Sessions are stored as notebooks; rebuild the SessionResult from
+    # the notebook projection (audit #56/#96) and save as JSON.
+    from kerno.notebook.continuation import load_notebook
+    from kerno.kernel.runtime import KernelRuntime
+    from kerno.types import SessionResult, SessionStatus, Cell
+
+    sessions_dir = Path(getattr(args, "dir", "sessions"))
+    matches = list(sessions_dir.glob("*{}.ipynb".format(session_id[:8])))
+    if not matches:
+        print(
+            "❌ No session notebook found for {!r} in {}".format(
+                session_id, sessions_dir
+            ),
+            file=sys.stderr,
+        )
+        return 1
+
+    nb_path = matches[0]
+    with KernelRuntime() as kernel:
+        cells, task = load_notebook(str(nb_path), kernel, re_execute=False)
+
+    result = SessionResult(
+        session_id      = session_id,
+        task            = task,
+        status          = SessionStatus.COMPLETE,
+        cells           = cells,
+        final_namespace = "{}",
+    )
+    path = save_session(result, out_path)
+    print("Exported session → {}".format(path))
+    return 0
 
 
 def session_list(args) -> int:
@@ -550,6 +791,68 @@ def cmd_config(args, config) -> int:
     return 1
 
 
+def check_runtime_invariants() -> tuple[bool, str]:
+    """
+    Verify the installed runtime's own invariant layer (P1-P10, audit
+    #101) against synthetic valid data — a broken invariant check would
+    raise and report a failure here.
+    """
+    try:
+        from types import SimpleNamespace as NS
+        from kerno.invariants import (
+            check_artifact_provenance, check_attenuation,
+            check_denied_never_started, check_generation_monotonic,
+            check_monotonic_sequence, check_replay_llm_free,
+            check_session_recovered, check_single_terminal_state,
+            check_terminal_events,
+        )
+        # P1/P2/P5: a clean event chain
+        events = [
+            NS(execution_id="e1", event_type="EXECUTION_REQUESTED", sequence=1),
+            NS(execution_id="e1", event_type="EXECUTION_STARTED",    sequence=2),
+            NS(execution_id="e1", event_type="EXECUTION_COMPLETED",  sequence=3),
+        ]
+        check_terminal_events(events)
+        check_denied_never_started(events)
+        check_monotonic_sequence(events)
+
+        # P3/P10: single terminal transition
+        def st(name, terminal=False):
+            return NS(name=name, terminal=terminal)
+        check_single_terminal_state([
+            NS(from_status=st("CREATED"), to_status=st("AUTHORIZING")),
+            NS(from_status=st("AUTHORIZING"), to_status=st("SUCCESS", True)),
+        ])
+
+        # P4: artifact provenance references a valid execution
+        check_artifact_provenance(
+            [NS(digest="sha256:a", creator_execution="exec_00000001")],
+            ["exec_00000001"],
+        )
+
+        # P6: capability attenuation
+        from kerno.security.capabilities import (
+            Capability, CapabilityBroker, CAP_FILESYSTEM_READ,
+        )
+        broker = CapabilityBroker()
+        parent = broker.grant(
+            Capability(CAP_FILESYSTEM_READ, scope="/workspace/**")
+        )
+        broker.attenuate(parent, scope="/workspace/datasets/**")
+        check_attenuation(broker.all_grants())
+
+        # P7: replay does not invoke the Brain
+        check_replay_llm_free(NS(call_count=0), object())
+
+        # P8/P9: generation monotonic; session survives restart
+        check_generation_monotonic([1, 1, 2])
+        check_session_recovered(NS(name="COMPLETE"), [1, 2], auto_restart=True)
+
+        return True, "all P1-P10 invariant checks passed"
+    except Exception as exc:
+        return False, "{}: {}".format(type(exc).__name__, str(exc)[:120])
+
+
 def cmd_doctor(args, config) -> int:
     """Execute: kerno doctor — environment diagnostic"""
     print("kerno doctor — environment check")
@@ -560,14 +863,21 @@ def cmd_doctor(args, config) -> int:
         ("jupyter_client",       lambda: check_import("jupyter_client")),
         ("ipykernel",            lambda: check_import("ipykernel")),
         ("nbformat",             lambda: check_import("nbformat")),
-        ("pandas",               lambda: check_import("pandas")),
-        ("numpy",                lambda: check_import("numpy")),
-        ("matplotlib",           lambda: check_import("matplotlib")),
-        ("sklearn",              lambda: check_import("sklearn")),
         ("Kernel starts",        check_kernel_starts),
+        ("Runtime invariants",    check_runtime_invariants),
         ("API key (Anthropic)",  lambda: check_env("ANTHROPIC_API_KEY")),
         ("API key (OpenAI)",     lambda: check_env("OPENAI_API_KEY")),
         (".kerno/ directory",    lambda: check_dir(".kerno")),
+    ]
+
+    # Optional packs (audit #16): reported, but never fail the check —
+    # a lean `pip install kerno` without kerno[data] is a valid setup.
+    optional_checks = [
+        ("pandas (data pack)",     lambda: check_import("pandas")),
+        ("numpy (data pack)",      lambda: check_import("numpy")),
+        ("matplotlib (data pack)", lambda: check_import("matplotlib")),
+        ("sklearn (data pack)",    lambda: check_import("sklearn")),
+        ("fastapi (server pack)",  lambda: check_import("fastapi")),
     ]
 
     all_ok  = True
@@ -580,6 +890,14 @@ def cmd_doctor(args, config) -> int:
         print(line)
         if not ok and label not in ("API key (Anthropic)", "API key (OpenAI)"):
             all_ok = False
+
+    for label, check_fn in optional_checks:
+        ok, detail = check_fn()
+        icon       = "✓" if ok else "○"   # optional: never fails the check
+        line       = f"  {icon}  {label:<30}"
+        if detail:
+            line += f"  {detail}"
+        print(line)
 
     print("─" * 56)
     if all_ok:
@@ -662,6 +980,15 @@ def load_config(path: str):
         except Exception:
             pass
     return KernoConfig.from_env()
+
+
+def _no_api_key_configured() -> bool:
+    """True when neither Anthropic nor OpenAI key is set in the env."""
+    import os as _os
+    return not (
+        _os.environ.get("ANTHROPIC_API_KEY")
+        or _os.environ.get("OPENAI_API_KEY")
+    )
 
 
 def build_llm(provider: str, model: str, config):
@@ -830,3 +1157,39 @@ def cmd_bench(args, config) -> int:
         print("\n✓ Report saved → {}".format(output))
 
     return 0 if report.pass_rate >= 0.8 else 1
+
+
+def cmd_verify_env(args, config) -> int:
+    """Execute: kerno verify-env <manifest_path> (audit #57)"""
+    from kerno.reproducibility import ReproducibilityManifest, verify_environment
+
+    path = Path(args.manifest)
+    if not path.exists():
+        print(f"❌ Error: Manifest file not found: {path}", file=sys.stderr)
+        return 1
+
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        manifest = ReproducibilityManifest.from_dict(data)
+    except Exception as exc:
+        print(f"❌ Error loading manifest: {exc}", file=sys.stderr)
+        return 1
+
+    compat, warnings = verify_environment(manifest.environment, strict_packages=args.strict)
+    print(f"Checking environment compatibility for session: {manifest.session_id}")
+    print("─" * 60)
+    print(f"  Target Kernel Spec: {manifest.environment.kernel_spec}")
+    print(f"  Target Python:      {manifest.environment.python_version}")
+    print(f"  Target Platform:    {manifest.environment.platform}")
+    print(f"  Recorded Packages:  {len(manifest.environment.packages)}")
+    print("─" * 60)
+
+    if compat:
+        print("✅ Environment is compatible with the recorded session manifest.")
+        return 0
+    else:
+        print("⚠️  Environment discrepancies detected:")
+        for w in warnings:
+            print(f"  ✗ {w}")
+        return 1
+

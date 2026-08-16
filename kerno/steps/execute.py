@@ -35,11 +35,21 @@ class ExecuteStep:
         if not code:
             return state
 
+        cancel_token = state.metadata.get("cancel_token")
+        if cancel_token is not None and getattr(cancel_token, "is_set", lambda: False)():
+            state.complete = True
+            state.metadata["interrupted"] = True
+            return state
+
+        exec_kwargs = {}
+        if cancel_token is not None:
+            exec_kwargs["cancel_event"] = cancel_token
+
         with self._tracer.span(
             "step.execute",
             {"code.preview": code[:60].replace("\n", " ")}
         ):
-            output = self.kernel.execute(code, timeout=self.timeout)
+            output = self.kernel.execute(code, timeout=self.timeout, **exec_kwargs)
 
         cell_num = len(state.history) + 1
         cell     = Cell(
@@ -50,6 +60,10 @@ class ExecuteStep:
         )
         state.history.append(cell)
         state.namespace = self.kernel.namespace
+
+        if cancel_token is not None and getattr(cancel_token, "is_set", lambda: False)():
+            state.complete = True
+            state.metadata["interrupted"] = True
 
         if output.has_error:
             classified                   = self.classifier.classify(output.error)

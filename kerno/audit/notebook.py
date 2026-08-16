@@ -13,6 +13,7 @@ The audit trail is the memory that persists beyond any single session.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import datetime
 from pathlib import Path
@@ -38,10 +39,16 @@ class NotebookAuditTrail:
         trail.save("sessions/")
     """
 
-    def __init__(self, task: str, session_id: str = ""):
+    def __init__(
+        self,
+        task:       str,
+        session_id: str = "",
+        redactor:   Optional[callable] = None,
+    ):
         self._nb         = nbformat.v4.new_notebook()
         self._task       = task
         self._session_id = session_id
+        self._redactor   = redactor
         self._started_at = datetime.now()
 
         # Notebook metadata
@@ -58,6 +65,14 @@ class NotebookAuditTrail:
                 "framework":  "kerno",
             }
         })
+
+    def _redact(self, text: str) -> str:
+        """Apply the configured redactor (audit #67: secrets are never
+        stored in the notebook — code, reasoning, and error text all
+        pass through the scrubbing layer)."""
+        if self._redactor is None or not text:
+            return text
+        return self._redactor(text)
 
     # ── Building ───────────────────────────────────────────────────────────────
 
@@ -78,24 +93,32 @@ class NotebookAuditTrail:
         Add one executed cell and its output to the notebook.
         Optionally prepends a reasoning Markdown cell.
         """
-        # Reasoning cell (if present)
+        # Reasoning cell (if present) — redacted
         if cell.reasoning:
             md = nbformat.v4.new_markdown_cell(
-                f"### 💭 Reasoning (Cell {cell.cell_num})\n{cell.reasoning}"
+                "### 💭 Reasoning (Cell {})\n{}".format(
+                    cell.cell_num, self._redact(cell.reasoning)
+                )
             )
             md.metadata["kerno_cell_type"] = "reasoning"
             self._nb.cells.append(md)
 
-        # Error annotation cell
+        # Error annotation cell — redacted
         if cell.output.has_error:
             err_text = (
-                f"### ⚠️ Error in Cell {cell.cell_num}\n"
-                f"`{cell.output.error.ename}: {cell.output.error.evalue}`"
+                "### ⚠️ Error in Cell {}\n"
+                "`{}: {}`".format(
+                    cell.cell_num,
+                    self._redact(cell.output.error.ename),
+                    self._redact(cell.output.error.evalue),
+                )
             )
             self._nb.cells.append(nbformat.v4.new_markdown_cell(err_text))
 
-        # Code cell with outputs
-        code_cell = nbformat.v4.new_code_cell(cell.code)
+        # Code cell with outputs — the code SOURCE is redacted too, so a
+        # secret literal embedded in generated code never lands in the
+        # notebook (audit #67).
+        code_cell = nbformat.v4.new_code_cell(self._redact(cell.code))
         code_cell.outputs = self._convert_outputs(cell)
         code_cell.metadata.update({
             "kerno_cell_num":  cell.cell_num,
@@ -103,6 +126,17 @@ class NotebookAuditTrail:
             "kerno_duration":  cell.output.duration,
             "kerno_had_error": cell.output.has_error,
         })
+        # Execution ledger correlation (audit #56): the notebook becomes a
+        # human-readable projection of the execution record.
+        code_cell.metadata["kerno_execution"] = {
+            "execution_id": cell.output.execution_id,
+            "code_hash":    hashlib.sha256(
+                cell.code.encode("utf-8")
+            ).hexdigest()[:16],
+            "output_hash":  hashlib.sha256(
+                cell.output.as_text().encode("utf-8")
+            ).hexdigest()[:16],
+        }
         self._nb.cells.append(code_cell)
 
     def add_summary(self, result: SessionResult) -> None:
@@ -136,18 +170,46 @@ class NotebookAuditTrail:
 
     # ── Saving ─────────────────────────────────────────────────────────────────
 
-    def save(self, directory: str = "sessions") -> Path:
+    def save(
+        self,
+        directory: str = "sessions",
+        *,
+        manifest: Optional[dict] = None,
+    ) -> Path:
         """
         Write the notebook to disk.
 
         Args:
             directory: Directory to save into (created if not exists)
+            manifest:  Optional reproducibility manifest dict (audit #57).
+                       A light environment summary is embedded in the
+                       notebook metadata, and the full manifest is written
+                       next to the notebook as `<session_id>.manifest.json`.
 
         Returns:
             Path to the saved notebook
         """
         output_dir = Path(directory)
         output_dir.mkdir(parents=True, exist_ok=True)
+
+        if manifest:
+            env = manifest.get("environment", {})
+            if isinstance(env, dict):
+                self._nb.metadata["kerno"].update({
+                    "reproducibility": {
+                        "task_hash":         manifest.get("task_hash", ""),
+                        "model":             manifest.get("model_name", ""),
+                        "kernel_generation": manifest.get("kernel_generation", 0),
+                        "environment": {
+                            "python":   env.get("python_version", ""),
+                            "platform": env.get("platform", ""),
+                            "kernel":   env.get("kernel_spec", ""),
+                            "packages": len(env.get("packages", {})),
+                        },
+                    },
+                })
+            manifest_path = output_dir / f"{self._session_id}.manifest.json"
+            manifest_path.write_text(json.dumps(manifest, indent=2))
 
         ts       = self._started_at.strftime("%Y%m%d_%H%M%S")
         safe_task = (
@@ -166,12 +228,42 @@ class NotebookAuditTrail:
 
     # ── Class Methods ──────────────────────────────────────────────────────────
 
+    def save_as_artifact(
+        self,
+        store:        object,
+        directory:    str = "sessions",
+        *,
+        manifest:     Optional[dict] = None,
+    ) -> tuple:
+        """
+        Save the notebook AND store it content-addressed (audit #96).
+
+        The notebook is just another artifact: immutable, deduplicated,
+        and traceable. Returns (notebook_path, ArtifactRef).
+        """
+        from kerno.artifacts import MEDIA_TYPE_IPYNB
+
+        path = self.save(directory, manifest=manifest)
+        ref = store.store_file(
+            path,
+            media_type=MEDIA_TYPE_IPYNB,
+            metadata={"session_id": self._session_id, "task": self._task},
+        )
+        return path, ref
+
     @classmethod
-    def from_result(cls, result: SessionResult) -> "NotebookAuditTrail":
+    def from_result(
+        cls,
+        result:   SessionResult,
+        redactor: Optional[callable] = None,
+    ) -> "NotebookAuditTrail":
         """
         Build a complete notebook from a finished SessionResult.
         """
-        trail = cls(task=result.task, session_id=result.session_id)
+        trail = cls(
+            task=result.task, session_id=result.session_id,
+            redactor=redactor,
+        )
         trail.add_task_header(result.task)
 
         for cell in result.cells:

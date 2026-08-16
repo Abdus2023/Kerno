@@ -277,6 +277,70 @@ class KernelPool:
                 "active_tasks": list(self._active.keys()),
             }
 
+    def health_check(self) -> dict:
+        """
+        Report the health of every kernel in the pool (audit #34).
+
+        Returns {kernel_id: {state, alive, generation, cells, uptime,
+        task_id, tasks_served}}.
+        """
+        with self._lock:
+            kernels = list(self._all)
+
+        report: dict = {}
+        for pk in kernels:
+            report[pk.kernel_id] = {
+                "state":         pk.state.name,
+                "alive":         pk.runtime.is_alive,
+                "generation":    pk.runtime.generation,
+                "cells":         pk.runtime.cells_executed,
+                "uptime":        round(pk.runtime.uptime, 2),
+                "task_id":       pk.task_id,
+                "tasks_served":  pk.tasks_served,
+            }
+        return report
+
+    def restart(self, task_id: str) -> KernelRuntime:
+        """
+        Restart the kernel acquired by `task_id` IN PLACE.
+
+        The same KernelRuntime object survives (generation increments),
+        so the task's existing reference keeps working — the namespace is
+        reset and the kernel is re-bootstrapped with pool skills.
+
+        Raises:
+            ValueError: task_id has no acquired kernel
+        """
+        with self._lock:
+            pk = self._active.get(task_id)
+        if pk is None:
+            raise ValueError(
+                f"Task '{task_id}' has no acquired kernel to restart"
+            )
+
+        pk.state = KernelState.RESETTING
+        try:
+            pk.runtime.restart()
+            self._bootstrap(pk.runtime)
+            pk.state = KernelState.ACQUIRED
+        except Exception:
+            pk.state = KernelState.DEAD
+            raise
+        return pk.runtime
+
+    def interrupt(self, task_id: str) -> None:
+        """
+        Interrupt the running execution of the kernel acquired by task_id
+        (cancellation propagation, audit #83).
+        """
+        with self._lock:
+            pk = self._active.get(task_id)
+        if pk is None:
+            raise ValueError(
+                f"Task '{task_id}' has no acquired kernel to interrupt"
+            )
+        pk.runtime.interrupt()
+
     # ── Internals ─────────────────────────────────────────────────────────────
 
     def _warm_one(self) -> None:
