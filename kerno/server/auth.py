@@ -55,7 +55,6 @@ class APIKeyStore:
         # 16-byte random salt per key
         salt_bytes = bytes.fromhex(salt) if salt else secrets.token_bytes(16)
         derived    = self._derive(key, salt_bytes)
-        legacy_hash = hashlib.sha256(key.encode("utf-8")).hexdigest()
 
         self._keys[derived] = {
             "user_id":     user_id,
@@ -65,7 +64,6 @@ class APIKeyStore:
             "created_at":  time.time(),
             "active":      True,
             "salt_hex":    salt_bytes.hex(),
-            "legacy_hash": legacy_hash,
         }
 
     def validate(self, key: str) -> Optional[dict]:

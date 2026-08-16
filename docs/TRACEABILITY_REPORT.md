@@ -263,6 +263,16 @@ This traceability report provides an auditable, bidirectional map linking every 
 
 ---
 
+### Round 25: Thread-Safe Atomic Sequence Allocation & Auth Minimization
+* **Goal**: Guarantee atomic sequence allocation under high multi-threaded concurrency (`_sequence_lock`, `_event_lock`) and eliminate legacy hash remnants from APIKeyStore.
+* **Key Artifacts**:
+  * `kerno/execution/engine.py`: Synchronized `_sequence` and `_event_seq` counters using dedicated `threading.Lock` instances, guaranteeing atomicity under concurrent transaction execution.
+  * `kerno/server/auth.py`: Removed unused `legacy_hash` from stored API key records.
+  * `tests/unit/test_execution_engine.py`: Added `test_concurrent_execution_sequence_allocation_is_atomic` stress test running 50 concurrent worker threads and asserting unique, monotonic sequence allocation ($1 \dots 50$).
+  * `docs/TRACEABILITY_REPORT.md`: Calibrated release status and master traceability records.
+
+---
+
 ## 3. Formal Invariants Traceability Matrix
 
 | Invariant ID | Formal Property Description | Enforcing Code Location | Verification Test File |

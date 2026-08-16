@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import hashlib
 import inspect
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Optional
@@ -155,6 +156,8 @@ class ExecutionEngine:
         self._events:   list[ExecutionEvent]  = []
         self._sequence  = 0
         self._event_seq = 0
+        self._sequence_lock = threading.Lock()
+        self._event_lock    = threading.Lock()
         self._last_event: dict[str, str] = {}   # execution_id → last event_id
         self._cancel_support: Optional[bool] = None
         self._tracer    = get_tracer()
@@ -228,9 +231,10 @@ class ExecutionEngine:
         cancel_event:         Optional[object],
         silent:               bool,
     ) -> _TxContext:
-        execution_seq    = self._sequence + 1
-        execution_id     = "exec_{:08d}".format(execution_seq)
-        self._sequence   = execution_seq
+        with self._sequence_lock:
+            self._sequence += 1
+            execution_seq   = self._sequence
+            execution_id    = "exec_{:08d}".format(execution_seq)
 
         code_preview     = self._redact(code[:80].replace("\n", " "))
         caps             = (
@@ -719,19 +723,20 @@ class ExecutionEngine:
         had_error:    bool  = False,
     ) -> None:
         seq = sequence if sequence is not None else self._sequence
-        self._records.append(ExecutionRecord(
-            execution_id = execution_id,
-            sequence     = seq,
-            origin       = origin,
-            allowed      = allowed,
-            code_preview = code_preview,
-            rule         = rule,
-            capabilities = tuple(sorted(capabilities)),
-            action_id    = action_id,
-            effects      = tuple(sorted(effects)),
-            duration_ms  = duration_ms,
-            had_error    = had_error,
-        ))
+        with self._sequence_lock:
+            self._records.append(ExecutionRecord(
+                execution_id = execution_id,
+                sequence     = seq,
+                origin       = origin,
+                allowed      = allowed,
+                code_preview = code_preview,
+                rule         = rule,
+                capabilities = tuple(sorted(capabilities)),
+                action_id    = action_id,
+                effects      = tuple(sorted(effects)),
+                duration_ms  = duration_ms,
+                had_error    = had_error,
+            ))
         # Audit #80: project the record into the metrics stream.
         self._metrics.record_execution(
             allowed    = allowed,
@@ -740,24 +745,26 @@ class ExecutionEngine:
         )
 
     def _emit(self, event_type: str, execution_id: str, **payload) -> None:
-        self._event_seq += 1
-        event_id = "evt_{:08d}".format(self._event_seq)
-        # Causal chain: link each event to the previous event of the SAME
-        # execution (audit #79/#103) — replay reconstructs the exact order.
-        parent = self._last_event.get(execution_id)
-        self._last_event[execution_id] = event_id
-        self._events.append(ExecutionEvent(
-            event_id        = event_id,
-            event_type      = event_type,
-            execution_id    = execution_id,
-            sequence        = self._event_seq,
-            parent_event_id = parent,
-            payload         = dict(payload),
-        ))
+        with self._event_lock:
+            self._event_seq += 1
+            event_id = "evt_{:08d}".format(self._event_seq)
+            # Causal chain: link each event to the previous event of the SAME
+            # execution (audit #79/#103) — replay reconstructs the exact order.
+            parent = self._last_event.get(execution_id)
+            self._last_event[execution_id] = event_id
+            self._events.append(ExecutionEvent(
+                event_id        = event_id,
+                event_type      = event_type,
+                execution_id    = execution_id,
+                sequence        = self._event_seq,
+                parent_event_id = parent,
+                payload         = dict(payload),
+            ))
 
     def _next_execution_id(self) -> str:
-        self._sequence += 1
-        return "exec_{:08d}".format(self._sequence)
+        with self._sequence_lock:
+            self._sequence += 1
+            return "exec_{:08d}".format(self._sequence)
 
     # ── Audit / event stream views ─────────────────────────────────────────────
 

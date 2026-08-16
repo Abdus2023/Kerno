@@ -6,6 +6,8 @@ implementation phases (see `docs/kerno-deep-audit.md`).
 ## [0.2.1-dev] — 2026-08-16 (Traceability & Phase D/E Hardening)
 
 ### Security & Hardening (Phase D)
+- **Thread-Safe Atomic Sequence Allocation** — guarded `_sequence` and `_event_seq` with `threading.Lock` in `ExecutionEngine`, ensuring race-free sequence monotonicity under multi-threaded parallel execution.
+- **APIKeyStore Hash Minimization** — removed unused `legacy_hash` from stored API key records in `kerno/server/auth.py`.
 - **Canonical Execution Transaction Pipeline** — implemented `_prepare_transaction()` and `_finalize_transaction()` in `ExecutionEngine`, ensuring 100% semantic and lifecycle parity between synchronous and streaming execution modes (`K-001`).
 - **Indirect AST Builtin Defense** — enhanced `AllowList.check()` to intercept indirect builtin access via `getattr()`, `hasattr()`, `__builtins__`, `_original_import`, and dictionary subscript lookups in `kerno/security/allowlist.py`.
 - **Dangerous Stdlib Filter in Runtime Hook** — filtered dangerous system modules (`os`, `subprocess`, `sys`, `socket`, `ctypes`, `shutil`, `importlib`, etc.) from automatic standard library allowance in `to_kernel_code()`.

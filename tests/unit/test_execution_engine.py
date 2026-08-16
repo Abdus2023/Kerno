@@ -659,3 +659,30 @@ class TestAdversarialCapabilityAcquisition:
         assert rec1.execution_id == "exec_00000001"
         assert rec2.sequence == 2
         assert rec2.execution_id == "exec_00000002"
+
+
+    def test_concurrent_execution_sequence_allocation_is_atomic(self):
+        import concurrent.futures
+
+        kernel = FakeKernel()
+        engine = ExecutionEngine(kernel)
+
+        def worker(idx):
+            return engine.execute(f"x = {idx}")
+
+        # Execute 50 concurrent transactions across 10 worker threads
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as ex:
+            futures = [ex.submit(worker, i) for i in range(50)]
+            results = [f.result() for f in futures]
+
+        assert len(results) == 50
+        records = engine.records
+        assert len(records) == 50
+
+        # Monotonicity & Uniqueness invariant: exactly 1 to 50 allocated with zero collisions
+        sequences = [r.sequence for r in records]
+        exec_ids = [r.execution_id for r in records]
+
+        assert len(set(sequences)) == 50
+        assert len(set(exec_ids)) == 50
+        assert set(sequences) == set(range(1, 51))
