@@ -728,3 +728,39 @@ class TestAdversarialCapabilityAcquisition:
             assert out.error.ename == "AllowListViolation"
 
         assert kernel.calls == []
+
+
+    def test_concurrent_event_dag_causal_chains_are_isolated_and_monotonic(self):
+        import concurrent.futures
+
+        kernel = FakeKernel()
+        engine = ExecutionEngine(kernel)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as pool:
+            futures = [pool.submit(engine.execute, f"x = {i}") for i in range(50)]
+            [f.result() for f in futures]
+
+        events = engine.events
+        assert len(events) == 150
+
+        # Invariant P5: Monotonic sequence numbers from 1 to 150
+        event_ids = [e.event_id for e in events]
+        assert len(set(event_ids)) == 150
+        sequences = [e.sequence for e in events]
+        assert set(sequences) == set(range(1, 151))
+
+        # Invariant K-005: Per-execution causal parent chain integrity without cross-contamination
+        by_exec = {}
+        for e in events:
+            by_exec.setdefault(e.execution_id, []).append(e)
+
+        assert len(by_exec) == 50
+        for exec_id, exec_events in by_exec.items():
+            assert len(exec_events) == 3
+            e_req, e_start, e_comp = exec_events
+            assert e_req.event_type == "EXECUTION_REQUESTED"
+            assert e_start.event_type == "EXECUTION_STARTED"
+            assert e_comp.event_type == "EXECUTION_COMPLETED"
+            assert e_req.parent_event_id is None
+            assert e_start.parent_event_id == e_req.event_id
+            assert e_comp.parent_event_id == e_start.event_id

@@ -6,6 +6,7 @@ implementation phases (see `docs/kerno-deep-audit.md`).
 ## [0.2.1-dev] — 2026-08-16 (Traceability & Phase D/E Hardening)
 
 ### Security & Hardening (Phase D)
+- **Concurrent Event DAG Causal Chain Stress Testing** — added `test_concurrent_event_dag_causal_chains_are_isolated_and_monotonic` asserting that 50 concurrent transactions (150 events) across 10 threads maintain strictly monotonic sequence numbers and isolated causal parent chains (`K-005`, `P5`).
 - **Stream Generator Close Lifecycle Guarantees** — verified that prematurely closed streaming generators (e.g. client disconnects mid-stream) execute `finally` blocks, record audit logs, and emit `EVT_EXECUTION_COMPLETED` (`P1`, `K-005`).
 - **Profile Attenuation Hierarchy & Downgrade Prevention** — implemented `PROFILE_RANK` and `resolve_effective_profile()` in `kerno/server/security.py`, preventing client requests from downgrading server security policies (`K-012`).
 - **Complete Removal of `os.path` from Allowlists** — removed `os.path` from `data_analysis()` and enforced exact module name verification for dangerous imports in `kerno/security/allowlist.py` (`K-002`).
