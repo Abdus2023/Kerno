@@ -304,6 +304,14 @@ This traceability report provides an auditable, bidirectional map linking every 
 
 ---
 
+### Round 29: Stream Generator Abort / Premature Close Lifecycle Verification
+* **Goal**: Verify that consumer-closed streaming generators (e.g. client disconnects mid-stream) execute `finally` blocks, record audit logs, and emit `EVT_EXECUTION_COMPLETED`.
+* **Key Artifacts**:
+  * `tests/unit/test_execution_engine.py`: Added `test_stream_execute_finalizes_when_consumer_closes_generator` asserting clean transaction finalization on generator closure.
+  * `docs/TRACEABILITY_REPORT.md`: Synchronized master traceability matrix and invariant checks.
+
+---
+
 ## 3. Formal Invariants Traceability Matrix
 
 | Invariant ID | Formal Property Description | Enforcing Code Location | Verification Test File |

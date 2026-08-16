@@ -571,6 +571,27 @@ class TestEngineStreamExecute:
         assert "EXECUTION_COMPLETED" in event_types
         assert event_types[-1] == "EXECUTION_COMPLETED"
 
+    def test_stream_execute_finalizes_when_consumer_closes_generator(self):
+        class InfiniteStreamKernel(FakeKernel):
+            def stream_execute(self, code, **kw):
+                for i in range(100):
+                    yield ("stdout", f"chunk-{i}\n")
+
+        engine = ExecutionEngine(InfiniteStreamKernel())
+        gen = engine.stream_execute("x = 1")
+        first_chunk = next(gen)
+        assert first_chunk == ("stdout", "chunk-0\n")
+
+        # Consumer closes generator prematurely (e.g. client disconnect)
+        gen.close()
+
+        # Invariant P1 / K-005: Transaction lifecycle must still finalize cleanly
+        event_types = [e.event_type for e in engine.events]
+        assert "EXECUTION_STARTED" in event_types
+        assert "EXECUTION_COMPLETED" in event_types
+        assert event_types[-1] == "EXECUTION_COMPLETED"
+        assert len(engine.records) == 1
+
 
 class TestAllowListHookEncapsulation:
     """The kernel hook encapsulates _original_import in a closure and deletes it from globals."""
