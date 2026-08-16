@@ -39,7 +39,7 @@ def check_terminal_events(events: Iterable[object]) -> None:
     """
     terminal_types = {
         "EXECUTION_COMPLETED", "CAPABILITY_DENIED", "POLICY_BLOCKED",
-        "APPROVAL_DENIED", "EFFECT_VIOLATION",
+        "APPROVAL_DENIED", "EXECUTION_CANCELLED",
     }
     seen_terminal: set[str] = set()
     for event in events:
@@ -201,7 +201,8 @@ def check_replay_llm_free(llm_spy, replay_result: object) -> None:
 
 def check_generation_monotonic(generations: Iterable[int]) -> None:
     """
-    Observed kernel generations must be strictly increasing.
+    Observed kernel generations must be non-decreasing over time,
+    and strictly increment on restart (never regress).
 
     generations: observed values of KernelRuntime.generation over time.
     """

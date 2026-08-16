@@ -6,6 +6,11 @@ implementation phases (see `docs/kerno-deep-audit.md`).
 ## [0.2.1-dev] — 2026-08-16 (Traceability & Phase D/E Hardening)
 
 ### Security & Hardening (Phase D)
+- **ExecutionEngine Streaming Choke Point** — added `stream_execute()` to `ExecutionEngine`, enforcing capability authorization, allowlist inspection, and secret redaction on all streamed execution chunks (`K-001`).
+- **Import Hook Closure Encapsulation** — encapsulated `_restricted_import` in a closure and deleted helper references from kernel `globals()`, eliminating `_original_import` escape routes in `kerno/security/allowlist.py`.
+- **SharedMemory Deep-Copy Mutation Isolation** — enforced deep-copying on `put()`, `get()`, and `items()` in `kerno/isolation.py`, preventing mutable reference contamination on the host (`K-009`).
+- **P1/P8 Formal Invariant Alignment** — aligned `check_terminal_events()` with observational `EVT_EFFECT_VIOLATION` events and clarified `P8` non-decreasing generation semantics in `kerno/invariants.py`.
+- **Docker Sandbox Hardening** — added default `--security-opt=no-new-privileges:true` and `--cap-drop=ALL` to `DockerExecutor.start()`.
 - **PBKDF2-HMAC-SHA256 APIKeyStore** — upgraded from raw SHA-256 to salted PBKDF2 (100,000 iterations standard, 16-byte cryptographically random salt per key) with constant-time comparison (`hmac.compare_digest`) in `kerno/server/auth.py`.
 - **Skill Capability Attenuation Bridge** — implemented `grant_skill_capabilities()` bridging `SkillProvenance` declared capabilities into `CapabilityBroker` grants with strict subject scoping (`K-008`, `P6`) in `kerno/skilltrust.py`.
 - **Container Sandbox Profile** — added `docker-compose.security.yml` specifying the K-003 containment boundary (`cap_drop: [ALL]`, `read_only: true`, `network_mode: none`, `tmpfs`, and cgroups limits).

@@ -254,38 +254,42 @@ class AllowList:
             capability was already granted when they were first imported,
             and ipykernel internals lazily re-import them.
           - Everything else must be explicitly allowlisted.
+          - _original_import is encapsulated in function closure and NEVER
+            exposed in kernel globals() to prevent agent bypass.
         """
         if not self.allowed_modules:
             return ""
 
         allowed_repr = repr(self.allowed_modules)
         return f"""\
-import sys as _sys
-import builtins as _builtins
+def _kerno_install_import_hook():
+    import sys as _sys
+    import builtins as _builtins
 
-_KERNO_ALLOWED_MODULES = {allowed_repr}
-_original_import = _builtins.__import__
+    _allowed = {allowed_repr}
+    _orig = _builtins.__import__
 
-def _restricted_import(name, *args, **kwargs):
-    # Relative imports (level > 0) are internal machinery — always allow.
-    # Note: CPython passes `level` positionally as the 5th argument.
-    level = kwargs.get('level', 0) or (args[3] if len(args) > 3 else 0)
-    if level > 0:
-        return _original_import(name, *args, **kwargs)
-    top_level = name.split('.')[0]
-    if top_level in _KERNO_ALLOWED_MODULES:
-        return _original_import(name, *args, **kwargs)
-    # Already-loaded modules: capability was granted at first import,
-    # and the kernel itself lazily re-imports internals.
-    if top_level in _sys.modules:
-        return _original_import(name, *args, **kwargs)
-    # Standard library: always available.
-    if top_level in getattr(_sys, 'stdlib_module_names', ()):
-        return _original_import(name, *args, **kwargs)
-    raise ImportError(
-        f"Module '{{name}}' is not in the kerno allowlist. "
-        f"Available: {{_KERNO_ALLOWED_MODULES[:5]}}..."
-    )
+    def _restricted_import(name, *args, **kwargs):
+        # Relative imports (level > 0) are internal machinery — always allow.
+        level = kwargs.get('level', 0) or (args[3] if len(args) > 3 else 0)
+        if level > 0:
+            return _orig(name, *args, **kwargs)
+        top_level = name.split('.')[0]
+        if top_level in _allowed:
+            return _orig(name, *args, **kwargs)
+        # Already-loaded modules: capability was granted at first import
+        if top_level in _sys.modules:
+            return _orig(name, *args, **kwargs)
+        # Standard library: always available
+        if top_level in getattr(_sys, 'stdlib_module_names', ()):
+            return _orig(name, *args, **kwargs)
+        raise ImportError(
+            f"Module '{{name}}' is not in the kerno allowlist. "
+            f"Available: {{_allowed[:5]}}..."
+        )
 
-_builtins.__import__ = _restricted_import
+    _builtins.__import__ = _restricted_import
+
+_kerno_install_import_hook()
+del _kerno_install_import_hook
 """

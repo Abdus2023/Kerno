@@ -244,3 +244,13 @@ class TestVerify:
                     [Event("a", "X", 2), Event("b", "X", 1)])),
                 ("p8", lambda: check_generation_monotonic([1, 2])),
             ])
+
+
+    def test_effect_violation_observation_followed_by_completion_passes(self):
+        events = [
+            Event("e1", "EXECUTION_REQUESTED", 1),
+            Event("e1", "EXECUTION_STARTED", 2),
+            Event("e1", "EFFECT_VIOLATION", 3),     # observational event
+            Event("e1", "EXECUTION_COMPLETED", 4),   # terminal event
+        ]
+        check_terminal_events(events)  # no raise

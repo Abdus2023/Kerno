@@ -216,6 +216,20 @@ This traceability report provides an auditable, bidirectional map linking every 
 
 ---
 
+### Round 22: Execution Sink Closure, Namespace Hardening & Invariant Alignment
+* **Goal**: Close secondary execution sinks (`stream_execute`), encapsulate kernel import hooks against namespace extraction, enforce deep-copy memory isolation, and align invariant event semantics.
+* **Key Artifacts**:
+  * `kerno/execution/engine.py`: Implemented `stream_execute()` through the authorization and allowlist choke point (`K-001`).
+  * `kerno/security/allowlist.py`: Encapsulated `_restricted_import` inside an immediately invoked closure, removing `_original_import` from user `globals()`.
+  * `kerno/isolation.py`: Enforced deep-copy on `SharedMemory.put()` and `get()`, eliminating mutable reference leaks on the host.
+  * `kerno/invariants.py`: Aligned `P1` terminal event definitions with observational `EVT_EFFECT_VIOLATION` events; clarified `P8` generation monotonicity.
+  * `kerno/isolation_docker.py`: Added default `--cap-drop=ALL` and `--security-opt=no-new-privileges:true` flags.
+  * `pyproject.toml`: Updated package version to `0.2.1-dev`.
+  * `tests/unit/test_execution_engine.py` & `test_isolation.py`: Added regression tests for streaming choke points, closure encapsulation, and deep-copy mutation isolation.
+  * `docs/TRACEABILITY_REPORT.md`: Synchronized master traceability matrix and invariant checks.
+
+---
+
 ## 3. Formal Invariants Traceability Matrix
 
 | Invariant ID | Formal Property Description | Enforcing Code Location | Verification Test File |

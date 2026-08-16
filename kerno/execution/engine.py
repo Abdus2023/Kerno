@@ -459,6 +459,65 @@ class ExecutionEngine:
         )
         return output.stdout.strip()
 
+    def stream_execute(
+        self,
+        code:         str,
+        timeout:      float = 300.0,
+        origin:       str   = ORIGIN_AGENT,
+        capabilities: Optional[frozenset[str]] = None,
+        subject:      str   = "",
+        cancel_event: Optional[object] = None,
+    ):
+        """
+        Stream execution chunks through the authorization + policy boundary (K-001).
+
+        Applies capability broker authorization and allowlist checks BEFORE
+        streaming execution. Violations yield an error tuple and return
+        without touching the kernel.
+        """
+        execution_id = self._next_execution_id()
+        caps = self._default_capabilities if capabilities is None else frozenset(capabilities)
+
+        if origin == ORIGIN_AGENT:
+            # 1. Capability Authorization (K-008)
+            if self._broker is not None:
+                try:
+                    for name in caps:
+                        self._broker.require(name, subject=subject)
+                except CapabilityViolation as cv:
+                    self._emit(EVT_CAPABILITY_DENIED, execution_id, error=str(cv))
+                    yield ("error", f"CapabilityViolation: {str(cv)}")
+                    return
+
+            # 2. AllowList Policy Check
+            if self._allowlist is not None:
+                try:
+                    self._allowlist.check(code)
+                except AllowListViolation as alv:
+                    self._emit(EVT_POLICY_BLOCKED, execution_id, error=str(alv))
+                    yield ("error", f"AllowListViolation: {str(alv)}")
+                    return
+
+        # 3. Kernel Streaming Delegation
+        if hasattr(self._kernel, "stream_execute"):
+            self._emit(EVT_EXECUTION_STARTED, execution_id)
+            for kind, text in self._kernel.stream_execute(code, timeout=timeout, cancel_event=cancel_event):
+                if origin == ORIGIN_AGENT and self._redact_outputs:
+                    text = self._redact(text)
+                yield (kind, text)
+            self._emit(EVT_EXECUTION_COMPLETED, execution_id)
+        else:
+            out = self.execute(
+                code, timeout=timeout, origin=origin, capabilities=capabilities,
+                subject=subject, cancel_event=cancel_event,
+            )
+            if out.stdout:
+                yield ("stdout", out.stdout)
+            if out.stderr:
+                yield ("stderr", out.stderr)
+            if out.has_error:
+                yield ("error", f"{out.error.ename}: {out.error.evalue}")
+
     # ── Internals ──────────────────────────────────────────────────────────────
 
     def _require_all(self, capabilities: frozenset[str], subject: str) -> None:

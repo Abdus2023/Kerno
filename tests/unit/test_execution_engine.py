@@ -526,3 +526,33 @@ class TestMagicAndShellBlocking:
         al.check("df = pd.read_csv('data.csv')")
         # A percent in a string literal is NOT a magic line
         al.check("pct = 0.5 * 100")
+
+
+class TestEngineStreamExecute:
+    """ExecutionEngine.stream_execute() enforces policy on streaming chunks (K-001)."""
+
+    def test_stream_execute_blocks_violating_code(self):
+        engine = ExecutionEngine(FakeKernel(), allowlist=AllowList.data_analysis())
+        chunks = list(engine.stream_execute("import subprocess\nsubprocess.run(['x'])"))
+        assert len(chunks) == 1
+        assert chunks[0][0] == "error"
+        assert "AllowListViolation" in chunks[0][1]
+
+    def test_stream_execute_blocks_unauthorized_capabilities(self):
+        broker = CapabilityBroker()  # no grants
+        engine = ExecutionEngine(FakeKernel(), broker=broker, default_capabilities=frozenset({"kernel.execute"}))
+        chunks = list(engine.stream_execute("x = 1"))
+        assert len(chunks) == 1
+        assert chunks[0][0] == "error"
+        assert "CapabilityViolation" in chunks[0][1]
+
+
+class TestAllowListHookEncapsulation:
+    """The kernel hook encapsulates _original_import in a closure and deletes it from globals."""
+
+    def test_hook_code_does_not_leak_original_import_in_globals(self):
+        al = AllowList.data_analysis()
+        kcode = al.to_kernel_code()
+        assert "_kerno_install_import_hook()" in kcode
+        assert "del _kerno_install_import_hook" in kcode
+        assert "_original_import = _builtins.__import__\n" not in kcode

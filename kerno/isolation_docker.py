@@ -91,6 +91,8 @@ class DockerExecutor:
             "--cpus", str(self.cpus),
             "--memory", self.memory,
             "--pids-limit", str(self.pids_limit),
+            "--security-opt", "no-new-privileges:true",
+            "--cap-drop", "ALL",
         ]
         if not self.network:
             cmd.append("--network")

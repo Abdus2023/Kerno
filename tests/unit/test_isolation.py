@@ -194,3 +194,36 @@ def subprocess_timeout():
     def _raise(*a, **kw):
         raise sp.TimeoutExpired(cmd=["docker"], timeout=5)
     return _raise
+
+
+class TestSharedMemoryMutationIsolation:
+    """Audit P1: SharedMemory deep-copy isolation against host mutation."""
+
+    def test_shared_memory_put_mutation_isolated(self):
+        from kerno.isolation import SharedMemory
+
+        shared = SharedMemory()
+        orig = {"items": [1, 2, 3], "nested": {"val": 42}}
+        shared.put("data", orig, "agent-a")
+
+        # Mutating original object after put must not affect store
+        orig["items"].append(999)
+        orig["nested"]["val"] = 100
+
+        retrieved = shared.get("data")
+        assert retrieved is not None
+        assert retrieved.value["items"] == [1, 2, 3]
+        assert retrieved.value["nested"]["val"] == 42
+
+    def test_shared_memory_get_mutation_isolated(self):
+        from kerno.isolation import SharedMemory
+
+        shared = SharedMemory()
+        shared.put("data", {"items": [1, 2, 3]}, "agent-a")
+
+        # Mutating retrieved object must not affect store
+        r1 = shared.get("data")
+        r1.value["items"].append(555)
+
+        r2 = shared.get("data")
+        assert r2.value["items"] == [1, 2, 3]

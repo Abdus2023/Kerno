@@ -19,6 +19,7 @@ Two mechanisms:
 
 from __future__ import annotations
 
+import copy
 import json
 import time
 from dataclasses import dataclass, field
@@ -39,7 +40,7 @@ class SharedValue:
     def to_dict(self) -> dict:
         return {
             "key":       self.key,
-            "value":     self.value,
+            "value":     copy.deepcopy(self.value),
             "producer":  self.producer,
             "timestamp": self.timestamp,
         }
@@ -47,29 +48,46 @@ class SharedValue:
 
 class SharedMemory:
     """
-    Explicit cross-agent state store (audit #33).
+    Explicit cross-agent state store (audit #33, K-009).
 
     Only values put here may cross an agent boundary. Every value is
-    attributable to its producing agent.
+    deep-copied on write and read so caller mutations cannot contaminate
+    the shared memory or other agent runtimes.
     """
 
     def __init__(self):
         self._values: dict[str, SharedValue] = {}
 
     def put(self, key: str, value: Any, producer: str) -> SharedValue:
-        """Share a value produced by `producer` under `key`."""
-        sv = SharedValue(key=key, value=value, producer=producer)
+        """Share a value produced by `producer` under `key` (deep-copied)."""
+        sv = SharedValue(key=key, value=copy.deepcopy(value), producer=producer)
         self._values[key] = sv
         return sv
 
     def get(self, key: str) -> Optional[SharedValue]:
-        return self._values.get(key)
+        sv = self._values.get(key)
+        if sv is None:
+            return None
+        return SharedValue(
+            key       = sv.key,
+            value     = copy.deepcopy(sv.value),
+            producer  = sv.producer,
+            timestamp = sv.timestamp,
+        )
 
     def keys(self) -> list[str]:
         return list(self._values.keys())
 
     def items(self) -> list[SharedValue]:
-        return list(self._values.values())
+        return [
+            SharedValue(
+                key       = sv.key,
+                value     = copy.deepcopy(sv.value),
+                producer  = sv.producer,
+                timestamp = sv.timestamp,
+            )
+            for sv in self._values.values()
+        ]
 
     def producers(self) -> dict[str, list[str]]:
         """{agent: [keys it produced]} for attribution."""
