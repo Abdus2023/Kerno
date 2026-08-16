@@ -236,7 +236,8 @@ Profiles: `AllowList.permissive()` | `AllowList.data_analysis()` | `AllowList.re
 ### Runtime architecture & security model
 
 Kerno implements the deep-audit runtime contracts (`docs/kerno-deep-audit.md`,
-tracked in `docs/implementation-status.md`):
+tracked in `docs/implementation-status.md`; the full security audit lives
+in [`kerno-security-audit/`](kerno-security-audit/README.md)):
 
 **One execution choke point (K-001)** — every agent cell, in every loop
 strategy, passes through `ExecutionEngine`: authorization → policy →
