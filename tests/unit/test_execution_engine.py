@@ -686,3 +686,24 @@ class TestAdversarialCapabilityAcquisition:
         assert len(set(sequences)) == 50
         assert len(set(exec_ids)) == 50
         assert set(sequences) == set(range(1, 51))
+
+
+    def test_os_and_os_path_are_completely_blocked(self):
+        kernel = FakeKernel()
+        engine = ExecutionEngine(kernel, allowlist=AllowList.data_analysis())
+
+        os_payloads = [
+            "import os",
+            "import os.path",
+            "from os import path",
+            "from os.path import exists",
+            "__import__('os')",
+            "__import__('os.path')",
+        ]
+
+        for code in os_payloads:
+            out = engine.execute(code)
+            assert out.has_error
+            assert out.error.ename == "AllowListViolation"
+
+        assert kernel.calls == []

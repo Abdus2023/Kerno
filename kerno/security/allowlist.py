@@ -188,7 +188,7 @@ class AllowList:
                 "statsmodels", "seaborn", "plotly", "IPython",
                 "pathlib", "json", "re", "math", "datetime",
                 "collections", "itertools", "functools", "typing",
-                "dataclasses", "warnings", "io", "os.path",
+                "dataclasses", "warnings", "io",
                 # kerno built-in skills (safe wrappers)
                 "load", "profile", "plot_distributions", "plot_correlation",
                 "what_exists", "schema_of", "checkpoint",
@@ -309,7 +309,7 @@ def _kerno_install_import_hook():
         top_level = name.split('.')[0]
         # Block dangerous system modules unless explicitly declared in allowlist
         if top_level in _dangerous:
-            if top_level not in _allowed and not any(a.startswith(top_level + ".") for a in _allowed):
+            if name not in _allowed and not any(a == name or a.startswith(name + ".") for a in _allowed):
                 raise ImportError(f"Module '{{name}}' is restricted by security policy.")
         if top_level in _allowed:
             return _orig(name, *args, **kwargs)

@@ -34,12 +34,46 @@ PROFILES = {
     "read_only":     AllowList.read_only,
 }
 
+PROFILE_RANK = {
+    "none": 0,
+    "permissive": 1,
+    "data_analysis": 2,
+    "read_only": 3,
+}
+
+
+def resolve_effective_profile(
+    requested:       Optional[str],
+    server_default:  str  = "data_analysis",
+    allow_downgrade: bool = False,
+) -> str:
+    """
+    Resolve effective security profile preventing client downgrades (K-012).
+
+    If the requested profile is weaker than the server default, the server
+    default is enforced. Requests may only select equal or stronger profiles
+    (e.g., read_only when server default is data_analysis).
+    """
+    req = requested or server_default
+    if req not in PROFILE_RANK:
+        raise ValueError(
+            f"Unknown security profile: {req!r}. Available: {sorted(PROFILES.keys())}"
+        )
+    if server_default not in PROFILE_RANK:
+        server_default = "data_analysis"
+
+    if not allow_downgrade and PROFILE_RANK[req] < PROFILE_RANK[server_default]:
+        return server_default
+    return req
+
 
 def make_server_engine(
     kernel:            object,
     profile:           str = "data_analysis",
     capability_broker: Optional[CapabilityBroker] = None,
     budget:            Optional[ExecutionBudget] = None,
+    server_default:    Optional[str] = None,
+    allow_downgrade:   bool = False,
 ) -> object:
     """
     Wrap a raw kernel in the full choke point (K-001).
@@ -51,17 +85,24 @@ def make_server_engine(
                            trusted opt-out)
         capability_broker: CapabilityBroker for authorization (K-008)
         budget:            ExecutionBudget capping the session (audit #85)
+        server_default:    authoritative server default profile (K-012)
+        allow_downgrade:   whether client may downgrade below server default
 
     Returns an object satisfying the Executor protocol — pass it to any
     loop/pipeline factory as the `kernel` argument.
     """
+    if server_default is not None:
+        effective = resolve_effective_profile(profile, server_default=server_default, allow_downgrade=allow_downgrade)
+    else:
+        effective = profile or "data_analysis"
+
     allowlist = None
-    if profile != "none":
-        if profile not in PROFILES:
+    if effective != "none":
+        if effective not in PROFILES:
             raise ValueError(
-                f"Unknown security profile: {profile!r}. Available: {sorted(PROFILES.keys())}"
+                f"Unknown security profile: {effective!r}. Available: {sorted(PROFILES.keys())}"
             )
-        allowlist = PROFILES[profile]()
+        allowlist = PROFILES[effective]()
 
     engine = ExecutionEngine(
         kernel,

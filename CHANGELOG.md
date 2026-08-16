@@ -6,6 +6,10 @@ implementation phases (see `docs/kerno-deep-audit.md`).
 ## [0.2.1-dev] — 2026-08-16 (Traceability & Phase D/E Hardening)
 
 ### Security & Hardening (Phase D)
+- **Profile Attenuation Hierarchy & Downgrade Prevention** — implemented `PROFILE_RANK` and `resolve_effective_profile()` in `kerno/server/security.py`, preventing client requests from downgrading server security policies (`K-012`).
+- **Complete Removal of `os.path` from Allowlists** — removed `os.path` from `data_analysis()` and enforced exact module name verification for dangerous imports in `kerno/security/allowlist.py` (`K-002`).
+- **Universal Gateway Choke Point on all Transports** — routed `/run`, `/stream`, and WebSocket `/ws` through `_build_gateway_engine()` with cancellation token registration and server-side cell clamping (`K-011`, `K-013`).
+- **Production Compose Port Isolation & Non-Root User** — removed external port 8001 publishing in `docker-compose.prod.yml` and configured non-root user `kerno` (UID 1000) in `Dockerfile.kerno`.
 - **Thread-Safe Atomic Sequence Allocation** — guarded `_sequence` and `_event_seq` with `threading.Lock` in `ExecutionEngine`, ensuring race-free sequence monotonicity under multi-threaded parallel execution.
 - **APIKeyStore Hash Minimization** — removed unused `legacy_hash` from stored API key records in `kerno/server/auth.py`.
 - **Canonical Execution Transaction Pipeline** — implemented `_prepare_transaction()` and `_finalize_transaction()` in `ExecutionEngine`, ensuring 100% semantic and lifecycle parity between synchronous and streaming execution modes (`K-001`).

@@ -96,10 +96,10 @@ def create_app(
     pool.start()
 
     def _build_gateway_engine(kernel, profile: str = None, budget_cells: int = None):
+        from kerno.server.security import resolve_effective_profile
+
         # K-012: client cannot downgrade below server policy
-        prof = profile or default_security
-        if prof == "none":
-            prof = default_security
+        prof = resolve_effective_profile(profile, server_default=default_security, allow_downgrade=False)
 
         req_budget = None
         if budget_cells:
@@ -110,6 +110,8 @@ def create_app(
             profile           = prof,
             capability_broker = capability_broker,
             budget            = budget or req_budget,
+            server_default    = default_security,
+            allow_downgrade   = False,
         )
 
     # ── Routes ────────────────────────────────────────────────────────────────
@@ -381,9 +383,8 @@ def _execute_task(
     bootstrap(kernel)
 
     # K-001 / K-012: client cannot downgrade server policy
-    prof = getattr(request, "security", default_security) or default_security
-    if prof == "none":
-        prof = default_security
+    from kerno.server.security import resolve_effective_profile
+    prof = resolve_effective_profile(getattr(request, "security", None), server_default=default_security, allow_downgrade=False)
 
     req_budget = None
     req_cells = getattr(request, "budget_cells", None)

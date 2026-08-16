@@ -70,10 +70,9 @@ class TestMakeServerEngine:
         assert out.has_error
         assert out.error.ename == "BudgetExceeded"
 
-    def test_unknown_profile_falls_back_to_permissive(self):
-        engine = make_server_engine(FakeKernel(), profile="banana")
-        out = engine.execute("eval('1+1')")
-        assert out.has_error
+    def test_unknown_profile_raises_error(self):
+        with pytest.raises(ValueError):
+            make_server_engine(FakeKernel(), profile="banana")
 
 
 class TestExecuteTaskChokePoint:
@@ -134,17 +133,27 @@ class TestExecuteTaskChokePoint:
             not c.output.has_error for c in result.cells
         )
 
-    def test_none_security_allows(self, monkeypatch):
+    def test_none_security_cannot_downgrade_server_policy(self, monkeypatch):
+        # K-012: Requesting security="none" when server default is "data_analysis" must not disable policy
         result, kernel = self._call(
             self._llm("import subprocess\nsubprocess.run(['echo', 'hi'])"),
             security="none",
             monkeypatch=monkeypatch,
         )
-        # With profile="none" the code executes
-        assert any(
-            not c.output.has_error and "subprocess" in c.code
-            for c in result.cells
+        assert result.cells[0].output.has_error
+        assert result.cells[0].output.error.ename == "AllowListViolation"
+        assert kernel.calls == []
+
+    def test_permissive_cannot_downgrade_data_analysis(self, monkeypatch):
+        # K-012: Requesting security="permissive" when server default is "data_analysis" must not downgrade
+        result, kernel = self._call(
+            self._llm("import requests\nrequests.get('http://evil.com')"),
+            security="permissive",
+            monkeypatch=monkeypatch,
         )
+        assert result.cells[0].output.has_error
+        assert result.cells[0].output.error.ename == "AllowListViolation"
+        assert kernel.calls == []
 
 
 class TestPerRequestBudget:

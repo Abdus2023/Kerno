@@ -284,6 +284,17 @@ This traceability report provides an auditable, bidirectional map linking every 
 
 ---
 
+### Round 27: Profile Attenuation Hierarchy, os.path Removal & Negative Downgrade Suite
+* **Goal**: Enforce rank-ordered profile attenuation (`resolve_effective_profile`), eliminate `os.path` from `data_analysis()` allowlists, update stale test semantics, and add negative downgrade regression tests.
+* **Key Artifacts**:
+  * `kerno/server/security.py`: Implemented `PROFILE_RANK` and `resolve_effective_profile()` preventing client-requested security downgrades (`K-012`).
+  * `kerno/security/allowlist.py`: Removed `os.path` and enforced exact module matching on dangerous imports.
+  * `tests/unit/test_server_security.py`: Added `test_none_security_cannot_downgrade_server_policy`, `test_permissive_cannot_downgrade_data_analysis`, and updated `test_unknown_profile_raises_error`.
+  * `tests/unit/test_execution_engine.py`: Added `test_os_and_os_path_are_completely_blocked` asserting zero backend reach on `os` and `os.path`.
+  * `docs/TRACEABILITY_REPORT.md`: Calibrated release verification status and synchronized invariant tables.
+
+---
+
 ## 3. Formal Invariants Traceability Matrix
 
 | Invariant ID | Formal Property Description | Enforcing Code Location | Verification Test File |
