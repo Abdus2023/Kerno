@@ -1,0 +1,1311 @@
+# 03 — Branch Audit Timeseries
+
+Yes. Now that we have the **correct Kerno repository and branch**, we can go deeper.
+
+I checked the actual source tree against the extras, rather than relying only on `pyproject.toml`. The result is encouraging: **the optional dependencies correspond to real built-in skills**. <sup>[source]</sup>
+
+## Kerno 0.2.0 — dependency/feature audit
+
+[Kerno — `arena/01a0064f-kerno`](https://github.com/Abdus2023/Kerno/tree/arena%2F01a0064f-kerno)
+
+## 1. Time-series: `statsmodels`
+
+The package declares:
+
+```toml
+timeseries = ["statsmodels>=0.14"]
+```
+
+and the repository contains:
+
+```text
+kerno/skills/builtins/timeseries.py
+```
+
+The repository search also finds `statsmodels` associated with that implementation. <sup>[source]</sup>
+
+So this is not an invented/unused extra.
+
+Architecture:
+
+```text
+                    Kerno
+                      │
+                 Skill system
+                      │
+              ┌───────┴───────┐
+              │               │
+          timeseries       other skills
+              │
+              ▼
+          statsmodels
+              │
+       ┌──────┼──────┐
+       ▼      ▼      ▼
+     trend  season  forecast
+```
+
+### Installation
+
+```bash
+pip install "kerno[timeseries]"
+```
+
+---
+
+## 2. NLP: `nltk`
+
+The declaration is:
+
+```toml
+nlp = ["nltk>=3.8"]
+```
+
+And there is a corresponding implementation:
+
+```text
+kerno/skills/builtins/nlp.py
+```
+
+The repository search confirms NLTK usage in that skill. <sup>[source]</sup>
+
+This establishes an important dependency chain:
+
+```text
+pyproject.toml
+      │
+      ▼
+nltk dependency
+      │
+      ▼
+kerno/skills/builtins/nlp.py
+      │
+      ▼
+NLP capability
+```
+
+So:
+
+```bash
+pip install "kerno[nlp]"
+```
+
+is structurally justified.
+
+---
+
+## 3. Graph analysis: `networkx`
+
+The declaration is:
+
+```toml
+graphs = ["networkx>=3.1"]
+```
+
+And the source contains:
+
+```text
+kerno/skills/builtins/graph.py
+```
+
+with NetworkX usage. <sup>[source]</sup>
+
+There is also:
+
+```text
+kerno/skills/builtins/network.py
+```
+
+which is worth investigating separately because **network operations and graph analysis are conceptually different capabilities**. <sup>[source]</sup>
+
+This gives Kerno an architecture like:
+
+```text
+                    Kerno
+                      │
+             ┌────────┴────────┐
+             │                 │
+          Network             Graph
+             │                 │
+             ▼                 ▼
+       network operations   NetworkX
+                               │
+                               ▼
+                         graph analysis
+```
+
+This distinction could become important for the public API.
+
+---
+
+## 4. Documents: `pdfplumber` + `python-docx`
+
+The declaration:
+
+```toml
+documents = [
+    "pdfplumber>=0.10",
+    "python-docx>=1.1",
+]
+```
+
+is backed by:
+
+```text
+kerno/skills/builtins/docs.py
+```
+
+The repository search finds `pdfplumber` there. <sup>[source]</sup>
+
+So the dependency chain is:
+
+```text
+                  documents
+                     │
+              ┌──────┴──────┐
+              ▼             ▼
+         pdfplumber      python-docx
+              │             │
+              ▼             ▼
+             PDF           DOCX
+              │             │
+              └──────┬──────┘
+                     ▼
+              document skill
+```
+
+This is exactly the kind of functionality that should remain optional because PDF/DOCX parsing is not required by every Kerno deployment.
+
+---
+
+## 5. SQL: `SQLAlchemy`
+
+The same pattern exists for SQL:
+
+```toml
+sql = ["sqlalchemy>=2.0"]
+```
+
+and the repository has:
+
+```text
+kerno/skills/builtins/sql.py
+```
+
+with SQLAlchemy associated with it. <sup>[source]</sup>
+
+So:
+
+```bash
+pip install "kerno[sql]"
+```
+
+is also backed by a real built-in skill.
+
+---
+
+## 6. The architecture is actually skill-oriented
+
+This is the most important thing emerging from the audit.
+
+The dependency groups aren't just arbitrary package bundles.
+
+They correspond to **built-in Kerno skills**:
+
+```text
+kerno/
+└── skills/
+    └── builtins/
+        ├── timeseries.py
+        ├── nlp.py
+        ├── graph.py
+        ├── network.py
+        ├── docs.py
+        └── sql.py
+```
+
+That means the architecture is closer to:
+
+```text
+                         KERNO
+                           │
+                           ▼
+                     Agent Runtime
+                           │
+                      Skill Layer
+                           │
+          ┌────────────────┼─────────────────┐
+          │                │                 │
+          ▼                ▼                 ▼
+      Built-in          Optional          External
+       skills            deps              tools
+          │                │
+     ┌────┼────┐      ┌────┼────┐
+     ▼    ▼    ▼      ▼    ▼    ▼
+    SQL  NLP Graph  NLTK  Stats  NetworkX
+```
+
+This is much more interesting than simply saying "Kerno has optional Python dependencies."
+
+---
+
+## 7. Why the optional extras are good architecture
+
+Imagine someone only wants Kerno's core kernel/agent functionality.
+
+They run:
+
+```bash
+pip install kerno
+```
+
+They don't necessarily need:
+
+- NLTK
+- NetworkX
+- statsmodels
+- PDF parsing
+- DOCX parsing
+- SQLAlchemy
+- OpenAI
+- Anthropic
+
+Those packages can add significant dependency weight and potential security/update surface.
+
+Instead:
+
+```text
+Core
+ │
+ ├── Jupyter
+ ├── NumPy
+ ├── Pandas
+ ├── SciPy
+ └── Scikit-learn
+```
+
+then selectively:
+
+```text
++ [nlp]
++ [graphs]
++ [documents]
++ [timeseries]
++ [sql]
++ [openai]
++ [anthropic]
+```
+
+This is a sensible capability-oriented packaging model.
+
+---
+
+## 8. But there is a potential problem with `all`
+
+The current declaration is:
+
+```toml
+all = [
+    "anthropic>=0.20",
+    "openai>=1.0",
+    "sqlalchemy>=2.0",
+    "psutil>=5.9",
+    "statsmodels>=0.14",
+    "nltk>=3.8",
+    "networkx>=3.1",
+    "pdfplumber>=0.10",
+    "python-docx>=1.1",
+    "tabulate>=0.9",
+]
+```
+
+<sup>[source]</sup>
+
+But the individual extras are:
+
+```text
+anthropic
+openai
+sql
+timeseries
+nlp
+graphs
+documents
+security
+```
+
+There are two packages in `all` that deserve special attention:
+
+```text
+psutil
+tabulate
+```
+
+They aren't represented as their own public extras.
+
+That isn't necessarily wrong.
+
+But we need to answer:
+
+> **Why does `all` need them?**
+
+If they're used by core code, they probably belong in `dependencies`.
+
+If they're only used by a particular optional skill, they should probably belong to that skill's extra.
+
+If they're only used by CLI presentation/diagnostics, another extra may make more sense.
+
+This is a **dependency ownership question**.
+
+---
+
+## 9. `security = []` deserves investigation
+
+Currently:
+
+```toml
+security = []
+```
+
+This means:
+
+```bash
+pip install "kerno[security]"
+```
+
+adds nothing.
+
+But the repository contains:
+
+```text
+kerno/security/allowlist.py
+```
+
+as seen in the search results. <sup>[source]</sup>
+
+That's interesting.
+
+It suggests the name `security` may represent a **logical capability**, even though it currently has no third-party dependency.
+
+That could actually be perfectly valid:
+
+```text
+security capability
+        │
+        ▼
+pure Python implementation
+        │
+        └── no optional external package
+```
+
+If that's intentional, the README should explain it.
+
+Otherwise users may reasonably ask:
+
+> "Why does `[security]` exist if installing it changes nothing?"
+
+---
+
+## 10. `dev` is different from `all`
+
+This distinction should remain.
+
+### `all`
+
+Means:
+
+> Give me every runtime capability.
+
+### `dev`
+
+Means:
+
+> Give me what I need to develop/test Kerno.
+
+Currently `dev` includes:
+
+```text
+pytest
+pytest-asyncio
+pytest-timeout
+anthropic
+statsmodels
+networkx
+tabulate
+```
+
+<sup>[source]</sup>
+
+But notice something:
+
+`dev` does **not** include:
+
+```text
+nltk
+pdfplumber
+python-docx
+openai
+sqlalchemy
+```
+
+That raises a testing-coverage question.
+
+If there are tests for those capabilities, `dev` may be incomplete.
+
+---
+
+## 11. This leads to the next audit: import safety
+
+The most important thing I would check next is whether optional dependencies are imported **lazily**.
+
+Good:
+
+```python
+def analyze():
+    import statsmodels
+    ...
+```
+
+or:
+
+```python
+try:
+    import statsmodels
+except ImportError:
+    statsmodels = None
+```
+
+Bad for an optional feature:
+
+```python
+## module import happens immediately
+import statsmodels
+```
+
+at the top of a module that gets imported by Kerno's core skill registry.
+
+Why?
+
+Because then:
+
+```bash
+pip install kerno
+```
+
+could unexpectedly fail simply because `statsmodels` isn't installed.
+
+The desired architecture is:
+
+```text
+pip install kerno
+        │
+        ▼
+core starts successfully
+        │
+        ▼
+optional skill discovered
+        │
+        ▼
+dependency check
+        │
+   ┌────┴─────┐
+   ▼          ▼
+installed   missing
+   │          │
+   ▼          ▼
+execute    clear error
+```
+
+rather than:
+
+```text
+pip install kerno
+        │
+        ▼
+import everything
+        │
+        ▼
+ModuleNotFoundError
+```
+
+---
+
+## 12. The next major audit target
+
+I would now audit each built-in skill against four dimensions:
+
+| Skill | Extra | Dependency | Source | Lazy import | Tests |
+|---|---|---|---|---|---|
+| Time series | `timeseries` | statsmodels | `timeseries.py` | ⏳ | ⏳ |
+| NLP | `nlp` | NLTK | `nlp.py` | ⏳ | ⏳ |
+| Graph | `graphs` | NetworkX | `graph.py` | ⏳ | ⏳ |
+| Documents | `documents` | pdfplumber/docx | `docs.py` | ⏳ | ⏳ |
+| SQL | `sql` | SQLAlchemy | `sql.py` | ⏳ | ⏳ |
+| Anthropic | `anthropic` | Anthropic SDK | AI skill | ⏳ | ⏳ |
+| OpenAI | `openai` | OpenAI SDK | AI skill | ⏳ | ⏳ |
+| Security | `security` | none | `security/*` | N/A | ⏳ |
+
+This will tell us whether the packaging is merely **declared correctly** or is actually **runtime-correct**.
+
+And that distinction is critical.
+
+---
+
+## Current evidence status
+
+### Confirmed
+
+**Packaging:**
+
+`pyproject.toml` explicitly defines the extras. <sup>[source]</sup>
+
+**Time series:**
+
+`timeseries.py` exists and is associated with `statsmodels`. <sup>[source]</sup>
+
+**NLP:**
+
+`nlp.py` exists and is associated with NLTK. <sup>[source]</sup>
+
+**Graphs:**
+
+`graph.py` exists and is associated with NetworkX. <sup>[source]</sup>
+
+**Documents:**
+
+`docs.py` exists and is associated with `pdfplumber`. <sup>[source]</sup>
+
+**SQL:**
+
+`sql.py` exists and is associated with SQLAlchemy. <sup>[source]</sup>
+
+### Not yet proven
+
+We have **not yet established**:
+
+1. every optional import is lazy/safe;
+2. every extra has complete test coverage;
+3. `all` contains every runtime dependency actually needed;
+4. `dev` contains everything required to run the full test suite;
+5. optional skills fail gracefully when their extra isn't installed;
+6. documentation matches actual CLI/API behavior;
+7. the PyPI/package build contains all intended skill modules;
+8. the extras work from a clean virtual environment.
+
+**That is the next level of the Kerno audit.**
+
+---
+
+## deeper audit of the actual Kerno branch
+
+I went one level deeper into the implementation. We can now distinguish **good architecture**, **real issues**, and **things that still need verification**.
+
+### 1. The optional-import design is mostly correct
+
+This is a strong point.
+
+For example, `timeseries.py` does **not** import `statsmodels` when the module is loaded. Instead, `ts_decompose()` performs:
+
+```python
+from statsmodels.tsa.seasonal import seasonal_decompose
+```
+
+inside the function and converts a missing dependency into a useful error. <sup>[source]</sup>
+
+Likewise, the graph implementation imports NetworkX only when the graph functionality is invoked. <sup>[source]</sup>
+
+And the document implementation explicitly states that PDF/DOCX packages are imported only when a document is actually read. <sup>[source]</sup>
+
+So the intended behavior is:
+
+```text
+pip install kerno
+        │
+        ▼
+Kerno starts
+        │
+        ├── timeseries not used ──► no statsmodels required
+        ├── graph not used ───────► no networkx required
+        ├── PDF not used ─────────► no pdfplumber required
+        └── DOCX not used ────────► no python-docx required
+```
+
+**This is good.**
+
+---
+
+## 2. NLP is particularly well designed — but has one concern
+
+The NLP implementation says:
+
+> "Heavy imports are lazy so kernel startup stays fast." <sup>[source]</sup>
+
+And `_ensure_vader()` imports NLTK only when sentiment analysis is actually requested.
+
+It also attempts to acquire the VADER lexicon if it is not already present:
+
+```text
+NLTK
+ │
+ ├── installed?
+ │      │
+ │      └── yes
+ │
+ └── VADER data?
+        │
+        ├── yes → use it
+        │
+        └── no → nltk.download(...)
+```
+
+That is convenient for interactive use.
+
+### But this creates a reproducibility concern.
+
+A package should ideally not silently depend on network access during a normal function call.
+
+For an offline/server/container deployment:
+
+```python
+nltk.download("vader_lexicon")
+```
+
+may fail.
+
+The code does have a fallback lexicon, which is good, but this means the same call can produce different-quality results depending on whether the NLTK resource happens to be available. <sup>[source]</sup>
+
+### Recommendation
+
+Prefer:
+
+```text
+Kerno installation
+      │
+      ▼
+optional NLP extra
+      │
+      ▼
+explicit resource setup
+      │
+      ▼
+VADER available
+```
+
+rather than making runtime behavior depend on an implicit download.
+
+A future interface could be:
+
+```bash
+kerno setup nlp
+```
+
+or:
+
+```bash
+python -m kerno setup nlp
+```
+
+with explicit reporting:
+
+```text
+✓ nltk installed
+✓ vader_lexicon installed
+✓ NLP skill ready
+```
+
+That would be much more deterministic.
+
+---
+
+## 3. The graph implementation has a dependency boundary that makes sense
+
+`build_graph()` imports NetworkX lazily and raises:
+
+```text
+networkx is required
+```
+
+if it isn't installed. <sup>[source]</sup>
+
+The API is also nicely structured:
+
+```python
+build_graph(...)
+graph_centrality(...)
+draw_graph(...)
+```
+
+So there is a clear progression:
+
+```text
+edge table
+   │
+   ▼
+build_graph()
+   │
+   ▼
+NetworkX graph
+   │
+   ├── graph_centrality()
+   │
+   └── draw_graph()
+```
+
+That's a good skill boundary.
+
+---
+
+## 4. The document skill is broader than just PDF/DOCX
+
+This is an important discovery.
+
+The `documents` extra provides:
+
+```text
+PDF
+DOCX
+```
+
+but `docs.py` also contains pure-Python functionality:
+
+```text
+chunk_text()
+extract_patterns()
+```
+
+So:
+
+```text
+documents
+│
+├── read_pdf()
+├── read_docx()
+├── chunk_text()
+└── extract_patterns()
+```
+
+The latter two don't require `pdfplumber` or `python-docx`. <sup>[source]</sup>
+
+This raises a packaging/design question:
+
+> Should `chunk_text()` and `extract_patterns()` really be coupled to the `documents` extra?
+
+Maybe not.
+
+A cleaner architecture could eventually be:
+
+```text
+text
+├── chunk_text
+└── extract_patterns
+
+documents
+├── read_pdf
+└── read_docx
+```
+
+That would allow:
+
+```bash
+pip install kerno
+```
+
+to use basic text processing without installing document parsers.
+
+This isn't necessarily a bug, but it's a **dependency-boundary improvement**.
+
+---
+
+## 5. The tests are doing something very useful
+
+The advanced skill tests don't simply import the optional third-party packages at test-module startup.
+
+Instead, they retrieve the generated skill source through:
+
+```python
+module.get_code()
+```
+
+then execute it in a controlled namespace. <sup>[source]</sup>
+
+This matches Kerno's unusual architecture:
+
+```text
+Python module
+      │
+      ▼
+get_code()
+      │
+      ▼
+generated skill source
+      │
+      ▼
+execution inside kernel context
+```
+
+That's important.
+
+Kerno isn't simply:
+
+```text
+import module
+call function
+```
+
+It has a **skill-code generation/execution layer**.
+
+That changes how we should audit it.
+
+---
+
+## 6. NLP has an actual fallback test
+
+The test deliberately makes NLTK unavailable:
+
+```text
+fake import
+     │
+     └── nltk → ImportError
+```
+
+and then verifies that sentiment analysis still works. <sup>[source]</sup>
+
+That's excellent testing of the optional dependency boundary.
+
+The test also exercises clustering.
+
+So we have evidence that the authors thought about:
+
+```text
+optional dependency missing
+             ↓
+        graceful fallback
+```
+
+rather than simply:
+
+```text
+ModuleNotFoundError
+```
+
+---
+
+## 7. Graph functionality has integration-with-dependency testing
+
+The test suite explicitly does:
+
+```python
+pytest.importorskip("networkx")
+```
+
+before exercising graph functionality. <sup>[source]</sup>
+
+Then it tests both:
+
+```text
+network.py
+graph.py
+```
+
+and checks:
+
+```text
+degree
+pagerank
+betweenness
+```
+
+This is useful because it validates the actual third-party integration rather than merely checking that the source parses.
+
+---
+
+## 8. But there is an obvious testing gap
+
+Look at the tests included in `test_advanced_skills.py`.
+
+There is testing for:
+
+- NLP
+- NetworkX/graph
+- documents' pure text functions
+- artifacts
+- simulation
+- optimization
+- finance
+- experiments
+- metadata
+- LLM tools
+
+But the file does **not appear to actually execute the statsmodels-powered functions** such as:
+
+```text
+ts_decompose()
+```
+
+and the other time-series operations.
+
+The test imports:
+
+```python
+timeseries
+```
+
+and includes it in:
+
+```python
+MODULES
+```
+
+but the generic test only checks:
+
+```python
+ast.parse(module.get_code())
+```
+
+for each module. <sup>[source]</sup>
+
+That's a meaningful difference:
+
+```text
+AST parses
+       ≠
+runtime works
+```
+
+So currently we have stronger evidence for:
+
+```text
+timeseries source validity
+```
+
+than for:
+
+```text
+statsmodels integration correctness
+```
+
+---
+
+## 9. Time-series implementation itself deserves a dedicated test suite
+
+There are several meaningful behaviors in `timeseries.py`:
+
+```text
+ts_prepare()
+_detect_period()
+ts_decompose()
+ts_summary()
+ts_forecast_linear()
+ts_detect_anomalies()
+ts_seasonality_check()
+```
+
+<sup>[source]</sup>
+
+These deserve direct tests.
+
+For example:
+
+### `ts_prepare`
+
+Test:
+
+```text
+unsorted dates
+      ↓
+sorted index
+      ↓
+numeric conversion
+      ↓
+optional resampling
+```
+
+### `ts_decompose`
+
+Test:
+
+```text
+short series
+     ↓
+correct ValueError
+```
+
+and:
+
+```text
+adequate seasonal series
+     ↓
+trend
+seasonal
+residual
+```
+
+### `ts_forecast_linear`
+
+Test:
+
+```text
+perfect linear series
+       ↓
+R² ≈ 1
+       ↓
+correct slope
+       ↓
+correct horizon
+```
+
+### `ts_detect_anomalies`
+
+Test all three:
+
+```text
+zscore
+iqr
+rolling
+```
+
+### `ts_seasonality_check`
+
+Test known periodic synthetic data.
+
+This would turn the time-series extra from **source-tested** into **behavior-tested**.
+
+---
+
+## 10. There is also a scientific-validity issue
+
+This is more important than a normal unit-test issue.
+
+`ts_summary()` calls:
+
+```text
+likely_stationary =
+    mean_shift < 0.1
+```
+
+That is only a **heuristic**, not a formal stationarity test. <sup>[source]</sup>
+
+Calling the result:
+
+```text
+"likely_stationary"
+```
+
+is reasonable if explicitly documented as a heuristic.
+
+But users could easily interpret it as:
+
+> "The series passed a statistical stationarity test."
+
+It hasn't.
+
+A stronger implementation could optionally expose:
+
+```text
+ADF
+KPSS
+```
+
+through statsmodels.
+
+For example:
+
+```text
+ts_stationarity_test()
+       │
+       ├── ADF
+       └── KPSS
+```
+
+while retaining:
+
+```text
+ts_summary()
+```
+
+as a fast heuristic.
+
+---
+
+## 11. Forecasting also needs careful labeling
+
+`ts_forecast_linear()` is explicitly a linear polynomial extrapolation:
+
+```python
+np.polyfit(x, y, 1)
+```
+
+It calculates R² and extrapolates future values. <sup>[source]</sup>
+
+That's perfectly valid as a **baseline forecast**.
+
+But R² measures goodness of fit to the historical data; it does **not** establish that the future forecast is accurate.
+
+Therefore:
+
+```text
+R² = 0.99
+```
+
+doesn't mean:
+
+```text
+forecast accuracy = 99%
+```
+
+The API/documentation should make this distinction very clear.
+
+A future version could add:
+
+```text
+train/test split
+walk-forward validation
+MAE
+RMSE
+MAPE
+```
+
+for actual forecast evaluation.
+
+---
+
+## 12. One more important issue: plotting is forced into skills
+
+Several functions automatically create/display Matplotlib figures.
+
+For example:
+
+```text
+ts_decompose()
+ts_forecast_linear()
+ts_detect_anomalies()
+```
+
+generate plots automatically. <sup>[source]</sup>
+
+The design documentation says:
+
+> "Always visualize alongside numerical results."
+
+That's a deliberate UX decision.
+
+For a Jupyter-native system, this makes sense.
+
+But for:
+
+```text
+headless server
+CLI
+automated agent
+API execution
+CI
+```
+
+automatic visualization can become undesirable.
+
+A stronger API would separate:
+
+```text
+analysis
+```
+
+from:
+
+```text
+presentation
+```
+
+For example:
+
+```python
+result = ts_decompose(series, plot=False)
+```
+
+and then:
+
+```python
+plot_timeseries_decomposition(result)
+```
+
+This would make Kerno more composable.
+
+---
+
+## 13. Current audit status
+
+I would now classify the extras like this:
+
+| Extra | Declaration | Real source | Lazy dependency | Runtime test | Assessment |
+|---|---|---|---|---|---|
+| `timeseries` |  |  |  |  limited | **Needs tests** |
+| `nlp` |  |  |  |  | **Good; resource issue** |
+| `graphs` |  |  |  |  | **Good** |
+| `documents` |  |  |  |  partial | **Good; boundary refinement** |
+| `sql` |  |  | likely |  not established | **Needs tests** |
+| `anthropic` |  | real AI tooling | needs audit | partial | **Needs audit** |
+| `openai` |  | needs deeper check | needs audit | partial | **Needs audit** |
+| `security` |  empty |  security code | N/A | needs audit | **Explain/document** |
+| `all` |  | multiple | — | — | **Needs dependency reconciliation** |
+| `dev` |  | — | — | partial | **Needs coverage audit** |
+
+---
+
+## 14. The bigger architectural picture
+
+We're starting to see that Kerno is not simply a package with optional libraries.
+
+It's closer to:
+
+```text
+                         KERNO
+                           │
+                 ┌─────────┴─────────┐
+                 │                   │
+             Kernel Runtime       Skill Runtime
+                 │                   │
+                 │            ┌──────┼────────┐
+                 │            │      │        │
+                 │           Data   AI      Knowledge
+                 │            │      │        │
+                 │         ┌──┼──┐  │    ┌───┼────┐
+                 │         │  │  │  │    │   │    │
+                 │        TS NLP Graph SQL Docs
+                 │
+                 ▼
+             Jupyter/IPython
+```
+
+And the optional dependencies are effectively **capability activation mechanisms**.
+
+That's a strong direction.
+
+---
+
+## Next audit stage
+
+The next thing I'd investigate is **the skill loader/registry itself**.
+
+Specifically:
+
+```text
+kerno/skills/
+    │
+    ├── discovery
+    ├── registry
+    ├── builtins
+    ├── execution
+    └── get_code()
+```
+
+Because that is where we can answer the most important architectural questions:
+
+1. **How are built-in skills discovered?**
+2. **When is their generated code executed?**
+3. **Can one missing optional dependency break skill registration?**
+4. **How does Kerno report an unavailable capability?**
+5. **Can an agent dynamically select a skill?**
+6. **Are skills isolated from the host/kernel?**
+7. **What prevents a generated skill from escaping its intended execution boundary?**
+8. **How does `kerno[all]` map onto the actual skill registry?**
+
+That is the point where this moves from a **dependency audit** into a genuine **Kerno architecture/security audit**.
