@@ -12,6 +12,7 @@ import uuid
 from typing import Optional
 
 try:
+    from contextlib            import asynccontextmanager
     from fastapi              import Depends, FastAPI, WebSocket, WebSocketDisconnect
     from fastapi.responses    import StreamingResponse, JSONResponse
     from fastapi.middleware.cors import CORSMiddleware
@@ -100,10 +101,30 @@ def create_app(
     # in tests) can have different auth policies.
     _mgmt_principal = make_principal_dependency(auth_required)
 
+    # Shared resources (pool lifecycle owned by the lifespan below).
+    pool   = KernelPool(size=pool_size, skills_path=skills_path)
+    memory = SimpleMemoryStore(persist_path=memory_path)
+    sessions: dict[str, SessionResult] = {}
+    # F-011: per-session owner map so /sessions/{id} and cancellation
+    # cannot cross principals. The data-plane endpoints also record
+    # ownership here so management-plane lookups stay consistent.
+    session_owners: dict[str, str] = {}
+    active_tokens: dict[str, CancellationToken] = {}
+
+    @asynccontextmanager
+    async def lifespan(app: "FastAPI"):
+        # Modern lifespan handler (replaces deprecated on_event).
+        pool.start()
+        try:
+            yield
+        finally:
+            pool.shutdown()
+
     app = FastAPI(
         title       = "kerno",
         description = "A kernel-native agent runtime",
         version     = "0.2.1-dev",
+        lifespan    = lifespan,
     )
 
     # F-010: explicit-origin CORS policy. Wildcard origins never carry
@@ -117,18 +138,6 @@ def create_app(
         allow_methods     = DEFAULT_CORS_METHODS,
         allow_headers     = DEFAULT_CORS_HEADERS,
     )
-
-    # Shared resources
-    pool   = KernelPool(size=pool_size, skills_path=skills_path)
-    memory = SimpleMemoryStore(persist_path=memory_path)
-    sessions: dict[str, SessionResult] = {}
-    # F-011: per-session owner map so /sessions/{id} and cancellation
-    # cannot cross principals. The data-plane endpoints also record
-    # ownership here so management-plane lookups stay consistent.
-    session_owners: dict[str, str] = {}
-    active_tokens: dict[str, CancellationToken] = {}
-
-    pool.start()
 
     def _principal_id(principal: Optional[dict]) -> str:
         if not principal:
@@ -481,10 +490,6 @@ def create_app(
                 "stdout":    c.output.stdout[:200],
             } for c in result.cells],
         }
-
-    @app.on_event("shutdown")
-    async def shutdown():
-        pool.shutdown()
 
     return app
 

@@ -20,6 +20,7 @@ import uuid
 from typing import Optional
 
 try:
+    from contextlib         import asynccontextmanager
     from fastapi            import Depends, FastAPI
     from fastapi.responses  import StreamingResponse, JSONResponse
     from fastapi.middleware.cors import CORSMiddleware
@@ -87,9 +88,17 @@ def create_openai_app(
     from kerno.skills.bootstrap   import bootstrap
     from kerno.streaming.protocol import EventKind
 
-    app  = FastAPI(title="Kerno OpenAI-Compatible API")
     pool = KernelPool(size=pool_size, skills_path=skills_path)
-    pool.start()
+
+    @asynccontextmanager
+    async def lifespan(app: "FastAPI"):
+        pool.start()
+        try:
+            yield
+        finally:
+            pool.shutdown()
+
+    app  = FastAPI(title="Kerno OpenAI-Compatible API", lifespan=lifespan)
 
     # F-010: explicit-origin CORS policy — the wildcard "*" is never
     # implicit. Pass cors_origins (or set KERNO_CORS_ORIGINS) for
@@ -348,10 +357,6 @@ def create_openai_app(
 
         finally:
             pool.release(task_id, reason="complete")
-
-    @app.on_event("shutdown")
-    async def shutdown():
-        pool.shutdown()
 
     return app
 

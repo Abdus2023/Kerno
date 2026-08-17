@@ -382,3 +382,29 @@ class TestSecureAppUsageScoping:
             assert r_b.json()["user_id"] == "user-b"
             assert r_a.json()["sessions"] == 1
             assert r_b.json()["sessions"] == 1
+
+
+# ── Production fail-closed: enable_auth=False forbidden in production ──────────
+
+class TestProductionAuthFailsClosed:
+
+    def test_secure_app_refuses_disabled_auth_in_production(
+        self, fake_infra, monkeypatch,
+    ):
+        monkeypatch.setenv("KERNO_RUNTIME_MODE", "production")
+        from kerno.server.secure_app import create_secure_app
+        with pytest.raises(RuntimeError, match="enable_auth=False"):
+            create_secure_app(
+                llm_factory=lambda info: _llm(), enable_auth=False,
+            )
+
+    def test_secure_app_allows_disabled_auth_outside_production(
+        self, fake_infra, monkeypatch,
+    ):
+        monkeypatch.delenv("KERNO_RUNTIME_MODE", raising=False)
+        from kerno.server.secure_app import create_secure_app
+        app = TestClient(create_secure_app(
+            llm_factory=lambda info: _llm("print(1)"), enable_auth=False,
+        ))
+        with app:
+            assert app.get("/health/live").status_code == 200

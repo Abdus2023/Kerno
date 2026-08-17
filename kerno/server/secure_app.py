@@ -10,6 +10,7 @@ import uuid
 from typing import Optional
 
 try:
+    from contextlib         import asynccontextmanager
     from fastapi            import Depends, FastAPI, Request
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses  import JSONResponse, StreamingResponse
@@ -58,15 +59,37 @@ def create_secure_app(
         enable_auth:  Enable API key authentication.
         default_security: Allowlist profile for every session (the
                           authenticated server defaults to data_analysis).
+
+    Note:
+        Authentication can only be disabled for local development. If
+        ``KERNO_RUNTIME_MODE=production`` is set, ``enable_auth=False``
+        raises ``RuntimeError`` at construction time rather than
+        silently exposing the server — a fail-closed production policy.
     """
     if not HAS_FASTAPI:
         raise ImportError("pip install fastapi uvicorn")
 
+    import os as _os
+    if (not enable_auth
+            and _os.environ.get("KERNO_RUNTIME_MODE", "").lower() == "production"):
+        raise RuntimeError(
+            "enable_auth=False is forbidden when KERNO_RUNTIME_MODE=production; "
+            "the production server must require API-key authentication."
+        )
+
     from kerno.kernel.pool import KernelPool
 
-    app  = FastAPI(title="Kerno Secure API", version="1.0.0")
     pool = KernelPool(size=pool_size, skills_path=skills_path)
-    pool.start()
+
+    @asynccontextmanager
+    async def lifespan(app: "FastAPI"):
+        pool.start()
+        try:
+            yield
+        finally:
+            pool.shutdown()
+
+    app  = FastAPI(title="Kerno Secure API", version="1.0.0", lifespan=lifespan)
 
     # Usage tracking
     usage_log: list[dict] = []
@@ -168,7 +191,8 @@ def create_secure_app(
             # FileMaterializer receives a narrow MaterializationExecutor,
             # never the raw kernel.
             from kerno.server.files import MaterializationExecutor
-            body = request.dict()
+            # Pydantic v2: model_dump() (dict() is deprecated).
+            body = request.model_dump()
             mat  = FileMaterializer(MaterializationExecutor(engine))
             try:
                 files = mat.process_from_context(body)
@@ -238,9 +262,5 @@ def create_secure_app(
         user_id = user_info.get("user_id")
         user_sessions = [u for u in usage_log if u["user_id"] == user_id]
         return {"user_id": user_id, "sessions": len(user_sessions), "log": user_sessions[-10:]}
-
-    @app.on_event("shutdown")
-    async def shutdown():
-        pool.shutdown()
 
     return app
