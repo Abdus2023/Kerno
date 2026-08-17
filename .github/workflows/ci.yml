@@ -3,10 +3,18 @@ name: CI
 # Kerno CI (F-009). Mirrors the local `make ci` gates exactly:
 # static checks → unit suite → security invariant suite → security
 # unit files → behavioral/integration/property suites.
+# Canonical certification workflow.
+#
+# Gate B first verifies and installs the hash-pinned dependency graph. Security
+# and test jobs install that same graph without dependency resolution, exposing
+# stable `lockfile`, `security`, and `test` checks for branch protection.
 on:
   push:
     branches: ["**"]
   pull_request:
+
+permissions:
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -14,27 +22,50 @@ concurrency:
 
 jobs:
   test:
+  lockfile:
+    name: lockfile
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
+          cache-dependency-path: requirements.lock.txt
+
+      - name: Install hash-pinned dependency graph
+        run: python -m pip install --require-hashes -r requirements.lock.txt
+
+      - name: Verify lockfile is up to date
+        run: python scripts/verify_lockfile.py
+
+  security:
+    name: security
+    needs: lockfile
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.lock.txt
 
       - name: Install package + dev/test dependencies
+      - name: Install locked environment and package
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
+          python -m pip install --require-hashes -r requirements.lock.txt
+          python -m pip install --no-deps --no-build-isolation .
+          python -m pip check
 
       - name: Static gates (compile + raw-kernel boundary)
+      - name: Static security gates
         run: |
           python -m compileall -q kerno tests
           python -c "import kerno; print('kerno imports OK')"
@@ -44,17 +75,48 @@ jobs:
         run: python -m pytest tests/unit -q
 
       - name: Security invariant suite
+      - name: Security regression suite
         run: python -m pytest tests/security -q
 
       - name: Security unit files
+      - name: Security and Phase-6 unit gates
         run: |
           python -m pytest \
             tests/unit/test_security.py \
-            tests/unit/test_execution_engine.py \
             tests/unit/test_capability_broker.py \
             tests/unit/test_secrets.py \
             tests/unit/test_isolation.py \
             tests/unit/test_invariants.py -q
+            tests/unit/test_invariants.py \
+            tests/unit/test_management_plane.py \
+            tests/unit/test_transport_parity.py \
+            tests/unit/test_static_gate.py -q
+
+  test:
+    name: test
+    needs: security
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.lock.txt
+
+      - name: Install locked environment and package
+        run: |
+          python -m pip install --require-hashes -r requirements.lock.txt
+          python -m pip install --no-deps --no-build-isolation .
+          python -m pip check
+
+      - name: Unit tests
+        run: python -m pytest tests/unit -q
 
       - name: Behavioral / integration / property suites
         run: python -m pytest tests/behavioral tests/integration tests/property -q
