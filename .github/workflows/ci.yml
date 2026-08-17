@@ -1,0 +1,60 @@
+name: CI
+
+# Kerno CI (F-009). Mirrors the local `make ci` gates exactly:
+# static checks → unit suite → security invariant suite → security
+# unit files → behavioral/integration/property suites.
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install package + dev/test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Static gates (compile + raw-kernel boundary)
+        run: |
+          python -m compileall -q kerno tests
+          python -c "import kerno; print('kerno imports OK')"
+          python scripts/check_raw_kernel.py
+
+      - name: Unit tests
+        run: python -m pytest tests/unit -q
+
+      - name: Security invariant suite
+        run: python -m pytest tests/security -q
+
+      - name: Security unit files
+        run: |
+          python -m pytest \
+            tests/unit/test_security.py \
+            tests/unit/test_execution_engine.py \
+            tests/unit/test_capability_broker.py \
+            tests/unit/test_secrets.py \
+            tests/unit/test_isolation.py \
+            tests/unit/test_invariants.py -q
+
+      - name: Behavioral / integration / property suites
+        run: python -m pytest tests/behavioral tests/integration tests/property -q
