@@ -21,12 +21,16 @@ sessions exactly as they do to local run() sessions.
 
 from __future__ import annotations
 
+import os
 from typing import Optional
 
 from kerno.execution.budget    import BudgetedExecutor, ExecutionBudget
 from kerno.execution.engine    import ExecutionEngine
 from kerno.security.allowlist  import AllowList
 from kerno.security.capabilities import CapabilityBroker
+from kerno.telemetry.logger    import get_logger
+
+log = get_logger("kerno.server.security")
 
 PROFILES = {
     "permissive":    AllowList.permissive,
@@ -40,6 +44,34 @@ PROFILE_RANK = {
     "data_analysis": 2,
     "read_only": 3,
 }
+
+
+# ── CORS policy (F-010) ───────────────────────────────────────────────────────
+
+DEFAULT_CORS_METHODS = ["GET", "POST", "OPTIONS"]
+DEFAULT_CORS_HEADERS = ["Content-Type", "Authorization"]
+
+
+def resolve_cors_origins(explicit: Optional[list[str]] = None) -> list[str]:
+    """
+    Resolve the CORS origin allowlist (F-010).
+
+    Precedence:
+        1. explicit `cors_origins` argument (deployment-provided)
+        2. KERNO_CORS_ORIGINS environment variable (comma-separated)
+        3. secure default: [] — same-origin only, no cross-origin browser
+           access
+
+    The wildcard "*" is never a hardcoded default; it must be explicitly
+    configured. Development setups can pass
+    `cors_origins=["http://localhost:3000"]` (or set KERNO_CORS_ORIGINS).
+    """
+    if explicit is not None:
+        return list(explicit)
+    env = os.environ.get("KERNO_CORS_ORIGINS", "")
+    if env.strip():
+        return [o.strip() for o in env.split(",") if o.strip()]
+    return []
 
 
 def resolve_effective_profile(
@@ -76,6 +108,7 @@ def build_gateway_engine(
     server_default:    str = "data_analysis",
     allow_downgrade:   bool = False,
     budget_cells:      Optional[int] = None,
+    transport:         str = "generic",
 ) -> object:
     """
     The single authoritative server gateway-engine builder (K-011).
@@ -92,11 +125,26 @@ def build_gateway_engine(
 
     Keeping one builder prevents the server layer from drifting into
     independently evolving security implementations.
+
+    `transport` names the calling surface ("http", "sse", "ws",
+    "openai", "openai-stream", "secure", ...) and is recorded with the
+    profile-resolution decision for observability (P2.13) — never the
+    request body, secrets, or headers.
     """
     from kerno.execution.budget import ExecutionBudget
 
+    requested = profile
     effective = resolve_effective_profile(
         profile,
+        server_default  = server_default,
+        allow_downgrade = allow_downgrade,
+    )
+
+    log.info(
+        "Gateway engine built",
+        transport       = transport,
+        requested       = requested or server_default,
+        effective       = effective,
         server_default  = server_default,
         allow_downgrade = allow_downgrade,
     )

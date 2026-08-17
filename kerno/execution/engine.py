@@ -290,6 +290,7 @@ class ExecutionEngine:
                     action_sm    = action_sm,
                     event_type   = EVT_CAPABILITY_DENIED,
                     event_payload = {"capability": exc.name, "subject": exc.subject},
+                    subject      = subject,
                 )
                 return _TxContext(
                     allowed            = False,
@@ -318,6 +319,7 @@ class ExecutionEngine:
                     action_sm    = action_sm,
                     event_type   = EVT_APPROVAL_DENIED,
                     event_payload = {"reason": "no_gate"},
+                    subject      = subject,
                 )
                 return _TxContext(
                     allowed            = False,
@@ -350,6 +352,7 @@ class ExecutionEngine:
                     action_sm    = action_sm,
                     event_type   = EVT_APPROVAL_DENIED,
                     event_payload = {"reason": "denied"},
+                    subject      = subject,
                 )
                 return _TxContext(
                     allowed            = False,
@@ -411,6 +414,7 @@ class ExecutionEngine:
                     action_sm    = action_sm,
                     event_type   = EVT_POLICY_BLOCKED,
                     event_payload = {"rule": exc.rule},
+                    subject      = subject,
                 )
                 return _TxContext(
                     allowed            = False,
@@ -774,6 +778,7 @@ class ExecutionEngine:
         event_type:   str,
         event_payload: dict,
         action_sm:    Optional[ActionStateMachine] = None,
+        subject:      str = "",
     ) -> CellOutput:
         if action_sm is not None:
             action_sm.transition(ActionStatus.REJECTED, reason=rule)
@@ -794,9 +799,15 @@ class ExecutionEngine:
                        if action_sm is not None else None
                    ),
                    **event_payload)
+        # Observability (P2.13): every security rejection identifies the
+        # execution, subject, origin, capability, and decision reason.
+        # Secrets are never included — code_preview is redacted upstream.
         log.warning(
             "Execution blocked by policy",
             execution_id = execution_id,
+            origin       = origin,
+            subject      = subject,
+            capabilities = ",".join(sorted(caps)) if caps else "",
             rule         = rule,
             code_preview = code_preview,
         )

@@ -37,6 +37,12 @@ class OpenWebUIRAGBridge:
         Content: ...
         [DOCUMENT 2]
         ..."
+
+    Security boundary (F-001): the bridge NEVER owns a raw kernel. It
+    receives a narrow MaterializationExecutor (execute_load_code) so the
+    generated loader runs through the ExecutionEngine choke point with
+    origin=ORIGIN_RUNTIME (trusted host code); a raw KernelRuntime or a
+    general-purpose executor is rejected structurally.
     """
 
     DOC_PATTERN = re.compile(
@@ -46,8 +52,14 @@ class OpenWebUIRAGBridge:
         re.DOTALL
     )
 
-    def __init__(self, kernel):
-        self.kernel = kernel
+    def __init__(self, executor):
+        if not hasattr(executor, "execute_load_code"):
+            raise TypeError(
+                "OpenWebUIRAGBridge requires a MaterializationExecutor (any "
+                "object with execute_load_code()); raw kernels and "
+                "general-purpose executors are not accepted (F-001)."
+            )
+        self._executor = executor
 
     def extract_and_load(self, messages: list[dict]) -> list[RAGDocument]:
         """
@@ -104,7 +116,9 @@ class OpenWebUIRAGBridge:
             f"print(f'  Sources: {{[d[\"source\"] for d in rag_documents]}}')\n"
             f"print(f'  Use search_docs(\"query\") to retrieve relevant passages')\n"
         )
-        self.kernel.execute(load_code, silent=False, timeout=10)
+        # Execute through the engine choke point (F-001) — the raw kernel
+        # is never reachable from here.
+        self._executor.execute_load_code(load_code, timeout=10)
 
     def build_context_note(self, docs: list[RAGDocument]) -> str:
         """Tell the LLM about the available documents."""

@@ -43,6 +43,7 @@ def create_secure_app(
     skills_path:  Optional[str] = None,
     enable_auth:  bool = True,
     default_security: str = "data_analysis",
+    cors_origins: Optional[list[str]] = None,
 ) -> "FastAPI":
     """
     Create a production-ready server.
@@ -68,11 +69,20 @@ def create_secure_app(
     # Usage tracking
     usage_log: list[dict] = []
 
+    # F-010: explicit-origin CORS policy for the authenticated server —
+    # the wildcard "*" is never implicit. Pass cors_origins (or set
+    # KERNO_CORS_ORIGINS) for cross-origin deployments; credentials are
+    # only allowed with explicit origins.
+    from kerno.server.security import (
+        DEFAULT_CORS_HEADERS, DEFAULT_CORS_METHODS, resolve_cors_origins,
+    )
+    origins = resolve_cors_origins(cors_origins)
     app.add_middleware(
         CORSMiddleware,
-        allow_origins  = ["*"],
-        allow_methods  = ["*"],
-        allow_headers  = ["*"],
+        allow_origins     = origins,
+        allow_credentials = bool(origins) and "*" not in origins,
+        allow_methods     = DEFAULT_CORS_METHODS,
+        allow_headers     = DEFAULT_CORS_HEADERS,
     )
 
     # Auth dependency
@@ -136,6 +146,7 @@ def create_secure_app(
                 budget            = None,
                 server_default    = default_security,
                 allow_downgrade   = False,
+                transport         = "secure",
             )
 
             # File handling — through the engine choke point (F-001).

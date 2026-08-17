@@ -287,3 +287,50 @@ class TestSecureAppEndpoint:
             })
         assert resp.status_code == 200
         assert "AllowListViolation" not in resp.json()["choices"][0]["message"]["content"]
+
+
+# ── F-010: CORS origin policy ─────────────────────────────────────────────────
+
+class TestCORSOriginPolicy:
+    """F-010: the wildcard '*' is never implicit; unauthorized origins get nothing."""
+
+    def _preflight(self, client, origin, path="/v1/chat/completions"):
+        return client.options(
+            path,
+            headers={
+                "Origin": origin,
+                "Access-Control-Request-Method": "POST",
+            },
+        )
+
+    def test_openai_secure_default_denies_cross_origin(self, fake_infra):
+        from kerno.server.openai_compat import create_openai_app
+        app = TestClient(create_openai_app(_llm()))   # no origins configured
+        with app:
+            resp = self._preflight(app, "https://evil.example")
+        assert "access-control-allow-origin" not in resp.headers
+
+    def test_openai_explicit_origins_only(self, fake_infra):
+        from kerno.server.openai_compat import create_openai_app
+        app = TestClient(create_openai_app(_llm(), cors_origins=["https://good.example"]))
+        with app:
+            ok = self._preflight(app, "https://good.example")
+            assert ok.headers.get("access-control-allow-origin") == "https://good.example"
+            bad = self._preflight(app, "https://evil.example")
+            assert "access-control-allow-origin" not in bad.headers
+
+    def test_secure_app_default_denies_cross_origin(self, fake_infra):
+        from kerno.server.secure_app import create_secure_app
+        app = TestClient(
+            create_secure_app(llm_factory=lambda user_info: _llm(), enable_auth=False)
+        )
+        with app:
+            resp = self._preflight(app, "https://evil.example")
+        assert "access-control-allow-origin" not in resp.headers
+
+    def test_main_app_default_denies_cross_origin(self, fake_infra):
+        from kerno.server.app import create_app
+        app = TestClient(create_app(_llm()))   # no origins configured
+        with app:
+            resp = self._preflight(app, "https://evil.example", path="/run")
+        assert "access-control-allow-origin" not in resp.headers

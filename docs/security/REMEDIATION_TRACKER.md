@@ -30,8 +30,12 @@ baseline `36943e1c854d576f1d3bbff96481ae57e7fb94b5`).
 | F-006 | Secure-app downgrade | `server_default` wiring | endpoint tests in `test_server_endpoint_security.py` | Pending | 🟢 IMPLEMENTED + TESTED LOCALLY |
 | F-007 | Missing endpoint tests | integration suite | sync + streaming endpoint tests for OpenAI + secure app (main `/run` `/stream` `/ws` already covered by `test_server_security.py`) | Pending | 🟢 IMPLEMENTED (OpenAI + secure endpoints) |
 | F-008 | Runtime-origin authority | `runtime_execute()`/`runtime_stream_execute()` trusted APIs; public `execute()`/`stream_execute()`/`execute_silent()` reject `ORIGIN_RUNTIME` | `TestOriginAuthorityBoundary` + `tests/unit/test_capability_escalation.py` | Pending | 🟢 IMPLEMENTED + TESTED LOCALLY |
-| F-009 | CI evidence | GitHub Actions workflow | workflow run | Pending | 🔴 OPEN |
-| F-010 | CORS | explicit origins | CORS tests | Pending | 🟡 OPEN |
+| F-009 | CI evidence | GitHub Actions workflow (`.github/workflows/ci.yml`) | workflow run | **Not yet executed** | 🟡 CI CONFIGURED (workflow registered on push; execution pending) |
+| F-010 | CORS | explicit-origin allowlist (`resolve_cors_origins` + `KERNO_CORS_ORIGINS`), no wildcard default | `TestCORSOriginPolicy` in `test_server_endpoint_security.py` | Pending | 🟢 IMPLEMENTED + TESTED LOCALLY |
+| — | Observability (P2.13) | denial logs carry execution_id/origin/subject/capabilities/rule; gateway logs transport+requested+effective+server_default; materialization logs file/source/hostname/decision (never secrets/contents) | suite logs verified | Pending | 🟢 IMPLEMENTED |
+| — | RAG bridge raw kernel (F-001 sibling) | `OpenWebUIRAGBridge` now requires `execute_load_code`; loads via engine | structural guard + static gate | Pending | 🟢 IMPLEMENTED + TESTED LOCALLY |
+| — | Static raw-kernel gate (P3.17) | `scripts/check_raw_kernel.py` — flags `KernelRuntime(` outside approved bootstrap files, raw `kernel.execute(` in `kerno/server/`, `urlretrieve(` anywhere | gate itself + `tests/security/test_invariants.py::test_static_raw_kernel_gate_passes` | Pending | 🟢 IMPLEMENTED |
+| — | Security invariant suite (P3.16) | `tests/security/` — 18 release-gate invariants (I-01…I-11) | `pytest tests/security` | Pending | 🟢 IMPLEMENTED + TESTED LOCALLY |
 | — | Baseline test bugs (5 pre-existing failures + 1 pool-stat bug + 1 flaky) | test corrections | `tests/unit` suite green | Pending | 🟢 FIXED (6 fixed; `test_unused_token_runs_normally` flaky under kernel contention, passes in isolation) |
 | — | P6 scope-containment gap (NEW, found by F-008 adversarial tests) | scope normalization in `CapabilityBroker` (`_normalize_scope`) | traversal cases in `test_capability_escalation.py` | Pending | 🟢 FIXED — `workspace/../etc/*` no longer contained in `workspace/*` |
 
@@ -137,6 +141,39 @@ tests/unit                       → 1039 passed, 1 skipped
 tests/behavioral + integration +
 tests/property                   → 124 passed, 5 skipped
 ```
+
+### Pass 4 — Phase 3 (HARDEN) + Phase 4 (PROVE) implemented
+
+**2026-08-17** — Phases 3 and 4 landed on `arena/01a00e08-kerno`:
+
+- **F-010 CORS** — wildcard `"*"` is no longer a default anywhere.
+  `resolve_cors_origins()` (explicit arg → `KERNO_CORS_ORIGINS` env →
+  secure same-origin default `[]`), methods/headers restricted
+  (`GET/POST/OPTIONS`, `Content-Type/Authorization`), credentials only
+  with explicit non-wildcard origins. All three servers parameterized.
+  `TestCORSOriginPolicy` proves `Origin: https://evil.example` gets no
+  CORS authorization under the secure default and that explicit
+  allowlists are honored.
+- **Observability (P2.13)** — engine denials now log execution_id, origin,
+  subject, capabilities, rule (never secrets/contents); `build_gateway_engine`
+  logs transport + requested + effective + server_default per session;
+  materialization logs file/source/hostname/decision.
+- **RAG bridge hardened (F-001 sibling)** — `OpenWebUIRAGBridge` also
+  executed generated load code on a raw kernel; it now requires the
+  `MaterializationExecutor` boundary (structural TypeError guard).
+- **Static raw-kernel gate (P3.17)** — `scripts/check_raw_kernel.py`:
+  `KernelRuntime(` construction allowed only in 9 explicitly classified
+  bootstrap files; raw `kernel.execute(` forbidden in `kerno/server/`;
+  `urlretrieve(` forbidden everywhere. Wired into `make ci`.
+- **Security invariant suite (P3.16)** — `tests/security/` with 18
+  release-gate invariants (I-01…I-11): choke point, origin authority,
+  capability/allowlist pre-execution denial, profile governance, SSRF
+  policy, materialization bounds, isolation, streaming parity,
+  cancellation finalization, and the static gate itself.
+- **F-009 CI bootstrap** — `.github/workflows/ci.yml` mirrors `make ci`
+  (compile, import gate, raw-kernel gate, unit, invariant, security,
+  behavioral/integration/property). Status: **CI CONFIGURED** — execution
+  evidence pending the first GitHub Actions run.
 
 ## Decision gate
 

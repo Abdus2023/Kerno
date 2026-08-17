@@ -132,6 +132,31 @@ everything above.
 
 ---
 
+## Post-remediation state (Phases 3–4, 2026-08-17)
+
+Phase 3 (HARDEN) + Phase 4 (PROVE) landed on the session branch:
+
+| Item | Status |
+|---|---|
+| F-010 CORS policy | 🟢 No wildcard default anywhere; `resolve_cors_origins()` (arg → `KERNO_CORS_ORIGINS` → secure `[]`); credentials only with explicit origins; `TestCORSOriginPolicy` proves evil origins get nothing |
+| Observability (P2.13) | 🟢 Denials log execution_id/origin/subject/capabilities/rule; gateway logs transport+profile decision; materialization logs file/source/hostname/decision — never secrets/contents |
+| RAG bridge raw kernel | 🟢 `OpenWebUIRAGBridge` moved onto the `MaterializationExecutor` boundary |
+| Static raw-kernel gate (P3.17) | 🟢 `scripts/check_raw_kernel.py` wired into `make ci` |
+| Security invariant suite (P3.16) | 🟢 `tests/security/` — 18 release-gate invariants (I-01…I-11) |
+| F-009 CI workflow | 🟡 **CI CONFIGURED** — `.github/workflows/ci.yml` mirrors `make ci`; execution evidence pending |
+
+Final local test state (2026-08-17):
+
+```text
+tests/unit      → 1042 passed, 1 skipped
+tests/security  → 18 passed
+```
+
+**Remaining:** F-009 CI execution evidence (`CI VERIFIED`), `main` branch
+protection (requires a green CI check), dependency lock/constraints.
+
+---
+
 ## Post-remediation state (Phase 2, 2026-08-17)
 
 Phase 2 (UNIFY) has landed on the session branch and is **tested locally**:

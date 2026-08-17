@@ -43,6 +43,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from kerno.execution.engine import ORIGIN_RUNTIME
+from kerno.telemetry.logger  import get_logger
+
+log = get_logger("kerno.server.files")
 
 # ── Materialization limits (F-003) ───────────────────────────────────────────
 
@@ -522,7 +525,7 @@ except ImportError:
             if self._session_dir.exists():
                 shutil.rmtree(self._session_dir, ignore_errors=True)
         except Exception as exc:  # pragma: no cover - defensive
-            print(f"[kerno] FileMaterializer cleanup error: {exc}")
+            log.warning("Materialization cleanup error", reason=str(exc)[:200])
 
     # ── Internal ──────────────────────────────────────────────────────────────
 
@@ -560,9 +563,14 @@ except ImportError:
         # is never reachable from here.
         output = self._executor.execute_load_code(load_code, timeout=30)
         if output.has_error:
-            print(
-                f"[kerno] File load warning: {name}: "
-                f"{output.error.ename}: {output.error.evalue}"
+            # Observability (P2.13): decision + file identity, never the
+            # file contents.
+            log.warning(
+                "Materialization load failed",
+                file     = name,
+                source   = "url" if url else "base64",
+                ename    = output.error.ename if output.error else "Error",
+                evalue   = output.error.evalue if output.error else "",
             )
             return None
 
@@ -590,7 +598,12 @@ except ImportError:
             try:
                 content = base64.b64decode(data_b64)
             except Exception as e:
-                print(f"[kerno] Base64 decode error for {name}: {e}")
+                log.warning(
+                    "Materialization base64 decode failed",
+                    file   = name,
+                    source = "base64",
+                    reason = str(e)[:200],
+                )
                 return None
             if len(content) > self._limits.max_file_bytes:  # defense in depth
                 raise MaterializationLimitError(
@@ -601,16 +614,38 @@ except ImportError:
 
         elif url:
             # F-002: policy-checked, size-capped, timed download.
-            _download_to_file(
-                url,
-                Path(local_path),
-                max_bytes      = self._limits.max_url_download_bytes,
-                connect_timeout = self._limits.url_connect_timeout,
-                read_timeout   = self._limits.url_read_timeout,
-                overall_timeout = self._limits.max_materialization_time,
-            )
+            try:
+                _download_to_file(
+                    url,
+                    Path(local_path),
+                    max_bytes      = self._limits.max_url_download_bytes,
+                    connect_timeout = self._limits.url_connect_timeout,
+                    read_timeout   = self._limits.url_read_timeout,
+                    overall_timeout = self._limits.max_materialization_time,
+                )
+            except UrlPolicyError as exc:
+                # Observability (P2.13): log hostname + decision, never the
+                # full URL (it could carry credentials) or any contents.
+                host = urllib.parse.urlparse(url).hostname or "<none>"
+                log.warning(
+                    "Materialization URL rejected by policy",
+                    file     = name,
+                    source   = "url",
+                    hostname = host,
+                    reason   = str(exc),
+                )
+                raise
+            except MaterializationLimitError as exc:
+                log.warning(
+                    "Materialization limit exceeded",
+                    file   = name,
+                    source = "url",
+                    reason = str(exc),
+                )
+                raise
 
         else:
+            log.debug("Materialization skipped: no data or url", file=name)
             return None
 
         size = Path(local_path).stat().st_size
