@@ -30,7 +30,7 @@ baseline `36943e1c854d576f1d3bbff96481ae57e7fb94b5`).
 | F-006 | Secure-app downgrade | `server_default` wiring | endpoint tests in `test_server_endpoint_security.py` | Pending | 🟢 IMPLEMENTED + TESTED LOCALLY |
 | F-007 | Missing endpoint tests | integration suite | sync + streaming endpoint tests for OpenAI + secure app (main `/run` `/stream` `/ws` already covered by `test_server_security.py`) | Pending | 🟢 IMPLEMENTED (OpenAI + secure endpoints) |
 | F-008 | Runtime-origin authority | `runtime_execute()`/`runtime_stream_execute()` trusted APIs; public `execute()`/`stream_execute()`/`execute_silent()` reject `ORIGIN_RUNTIME` | `TestOriginAuthorityBoundary` + `tests/unit/test_capability_escalation.py` | Pending | 🟢 IMPLEMENTED + TESTED LOCALLY |
-| F-009 | CI evidence | GitHub Actions workflow (`.github/workflows/ci.yml`) | workflow run | **Not yet executed** | 🟡 CI CONFIGURED (workflow registered on push; execution pending) |
+| F-009 | CI evidence | GitHub Actions workflow (`.github/workflows/ci.yml`) | workflow run | **Not yet executed** | 🟡 CI CONFIGURED (file prepared at `.github/workflows/ci.yml`; push BLOCKED — the arena GitHub App lacks the `workflows` permission, so GitHub refuses workflow-file pushes. Repo owner must commit/push the file or grant the app the permission) |
 | F-010 | CORS | explicit-origin allowlist (`resolve_cors_origins` + `KERNO_CORS_ORIGINS`), no wildcard default | `TestCORSOriginPolicy` in `test_server_endpoint_security.py` | Pending | 🟢 IMPLEMENTED + TESTED LOCALLY |
 | — | Observability (P2.13) | denial logs carry execution_id/origin/subject/capabilities/rule; gateway logs transport+requested+effective+server_default; materialization logs file/source/hostname/decision (never secrets/contents) | suite logs verified | Pending | 🟢 IMPLEMENTED |
 | — | RAG bridge raw kernel (F-001 sibling) | `OpenWebUIRAGBridge` now requires `execute_load_code`; loads via engine | structural guard + static gate | Pending | 🟢 IMPLEMENTED + TESTED LOCALLY |
@@ -172,8 +172,13 @@ tests/property                   → 124 passed, 5 skipped
   cancellation finalization, and the static gate itself.
 - **F-009 CI bootstrap** — `.github/workflows/ci.yml` mirrors `make ci`
   (compile, import gate, raw-kernel gate, unit, invariant, security,
-  behavioral/integration/property). Status: **CI CONFIGURED** — execution
-  evidence pending the first GitHub Actions run.
+  behavioral/integration/property). Status: **CI CONFIGURED** — the file
+  is ready at `.github/workflows/ci.yml`, but the push was REJECTED by
+  GitHub: the arena GitHub App (`arena-ai-coding-agent[bot]`) lacks the
+  `workflows` permission required to create/update workflow files (both
+  `git push` and the Contents REST API return 403). The repo owner must
+  either commit/push the file from the local workspace or grant the app
+  the `workflows` permission. Execution evidence remains pending.
 
 ## Decision gate
 
