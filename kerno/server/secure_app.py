@@ -125,18 +125,28 @@ def create_secure_app(
             bootstrap(kernel)
             # K-001: the authenticated server never executes raw kernel
             # code — every session goes through the choke point.
+            # K-012 (F-006): the server default is authoritative — the
+            # client may not downgrade below it.
             engine = make_server_engine(
                 kernel,
-                profile = getattr(request, "security", default_security),
+                profile          = getattr(request, "security", default_security),
+                server_default   = default_security,
+                allow_downgrade  = False,
             )
 
-            # File handling
+            # File handling — through the engine choke point (F-001).
+            # FileMaterializer receives a narrow MaterializationExecutor,
+            # never the raw kernel.
+            from kerno.server.files import MaterializationExecutor
             body = request.dict()
-            mat  = FileMaterializer(kernel)
-            files = mat.process_from_context(body)
-            task = _extract_task(request.messages)
-            if files:
-                task += "\n\n" + mat.build_context_message(files)
+            mat  = FileMaterializer(MaterializationExecutor(engine))
+            try:
+                files = mat.process_from_context(body)
+                task = _extract_task(request.messages)
+                if files:
+                    task += "\n\n" + mat.build_context_message(files)
+            finally:
+                mat.cleanup()
 
             factory  = make_reflect if request.loop == "reflect" else make_reactive
             pipeline = factory(kernel=engine, llm=llm, max_cells=max_cells)

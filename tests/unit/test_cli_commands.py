@@ -10,9 +10,13 @@ from kerno.types import Cell, CellOutput, SessionResult, SessionStatus
 
 class TestCliResumeFork:
 
-    def test_resume_parser_has_expected_args(self):
+    def test_resume_parser_has_expected_args(self, monkeypatch):
         from kerno.cli.main import main
         import sys
+        # Force the LLM build to fail so cmd_resume returns 1 before
+        # touching any notebook — this test verifies PARSER acceptance
+        # (no argparse SystemExit(2)), not session execution.
+        monkeypatch.setattr("kerno.cli.main.build_llm", lambda *a, **k: None)
         old = sys.argv
         sys.argv = ["kerno", "resume", "nb.ipynb",
                     "--task", "t", "--loop", "plan",
@@ -24,7 +28,7 @@ class TestCliResumeFork:
         finally:
             sys.argv = old
         # The parser ACCEPTED the args (no argparse SystemExit(2)); the
-        # command fails later at LLM build (no API key) — that's the
+        # command fails at LLM build (build_llm → None) — that's the
         # parse-success signal.
         assert code in (0, 1)
 

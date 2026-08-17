@@ -80,12 +80,16 @@ def make_server_engine(
 
     Args:
         kernel:            the acquired KernelRuntime (or any Executor)
-        profile:           allowlist profile: "data_analysis" (default),
-                           "read_only", "permissive", or "none" (explicit
-                           trusted opt-out)
+        profile:           requested allowlist profile: "data_analysis" (default),
+                           "read_only", "permissive", or "none". When
+                           server_default is supplied, the requested profile is
+                           resolved against it (K-012) — "none" and weaker
+                           profiles are upgraded to the server default.
         capability_broker: CapabilityBroker for authorization (K-008)
         budget:            ExecutionBudget capping the session (audit #85)
-        server_default:    authoritative server default profile (K-012)
+        server_default:    authoritative server default profile (K-012);
+                           when supplied, allow_downgrade=False (default)
+                           upgrades weaker requests to it
         allow_downgrade:   whether client may downgrade below server default
 
     Returns an object satisfying the Executor protocol — pass it to any

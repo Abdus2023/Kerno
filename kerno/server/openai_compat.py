@@ -173,15 +173,18 @@ def create_openai_app(
                 from kerno.server.security  import make_server_engine
 
                 bootstrap(kernel)
-                # K-001 / K-012: client cannot downgrade below server policy
+                # K-001 / K-012 (F-005): client cannot downgrade below the
+                # authoritative server policy. resolve_effective_profile()
+                # inside make_server_engine() upgrades "none"/"permissive"
+                # to server_default when requested.
                 prof = getattr(request, "security", default_security) or default_security
-                if prof == "none":
-                    prof = default_security
                 engine = make_server_engine(
                     kernel,
                     profile            = prof,
                     capability_broker  = capability_broker,
                     budget             = budget,
+                    server_default     = default_security,
+                    allow_downgrade    = False,
                 )
                 factory  = make_reflect if request.loop == "reflect" else make_reactive
                 pipeline = factory(
@@ -235,15 +238,16 @@ def create_openai_app(
 
         try:
             bootstrap(kernel)
-            # K-001 / K-012: client cannot downgrade below server policy
+            # K-001 / K-012 (F-005): client cannot downgrade below the
+            # authoritative server policy (same wiring as the sync path).
             prof = getattr(request, "security", default_security) or default_security
-            if prof == "none":
-                prof = default_security
             engine = make_server_engine(
                 kernel,
                 profile            = prof,
                 capability_broker  = capability_broker,
                 budget             = budget,
+                server_default     = default_security,
+                allow_downgrade    = False,
             )
             factory  = make_reflect if request.loop == "reflect" else make_reactive
             pipeline = factory(

@@ -21,7 +21,9 @@ class TestSharedMemory:
     def test_put_get_with_provenance(self):
         mem = SharedMemory()
         sv = mem.put("results_score", 42, producer="analyst")
-        assert mem.get("results_score") is sv
+        # get() returns a deep copy (shared-memory semantics), so equality
+        # is the correct check, not identity.
+        assert mem.get("results_score") == sv
         assert sv.producer == "analyst"
         assert sv.value == 42
 

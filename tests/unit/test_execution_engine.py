@@ -17,7 +17,7 @@ from kerno.interfaces import Executor
 from kerno.security.allowlist import AllowList, AllowListViolation
 from kerno.security.capabilities import (
     Capability, CapabilityBroker, CapabilityViolation,
-    CAP_KERNEL_EXECUTE, CAP_FILESYSTEM_READ,
+    CAP_KERNEL_EXECUTE, CAP_FILESYSTEM_READ, CAP_HUMAN_APPROVAL,
 )
 from kerno.types import CellOutput, Message, SessionStatus
 

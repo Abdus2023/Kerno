@@ -113,17 +113,31 @@ class TestFileMaterializer:
         assert "already loaded" in msg
 
     def test_process_from_context_files_array(self):
-        kernel = MagicMock()
-        kernel.execute.return_value = MagicMock(has_error=False)
+        # F-001: FileMaterializer executes through the narrow
+        # MaterializationExecutor interface, never a raw kernel.
+        executor = MagicMock()
+        executor.execute_load_code.return_value = MagicMock(has_error=False)
 
-        fm = FileMaterializer(kernel, upload_dir="/tmp/test_kerno")
+        fm = FileMaterializer(executor, upload_dir="/tmp/test_kerno")
         body = {"files": [{"name": "data.csv", "type": "text/csv", "data": "YWJj", "size": 3}]}
-        # _save_file will decode base64 "YWJj" → "abc"
-        # _process_one will try to execute in kernel
-        # Since kernel is a mock, this should work
+        # _save_file will decode base64 "YWJj" → "abc"; _process_one
+        # executes the generated load code via execute_load_code.
         results = fm.process_from_context(body)
-        # Mock kernel returns no error, so should materialize
-        assert len(results) >= 0  # May be 0 if mock doesn't set up correctly
+        assert len(results) == 1
+        assert results[0].original_name == "data.csv"
+        executor.execute_load_code.assert_called_once()
+
+    def test_constructor_rejects_raw_kernel(self):
+        # F-001 structural guard: a raw kernel / general executor is refused.
+        from kerno.server.files import FileMaterializer
+        import pytest
+
+        class _RawExecutor:
+            def execute(self, *args, **kwargs):
+                return None
+
+        with pytest.raises(TypeError):
+            FileMaterializer(_RawExecutor())
 
 
 # ── RAGDocument tests ────────────────────────────────────────────────────────

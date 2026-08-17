@@ -142,7 +142,9 @@ class TestExecuteTaskChokePoint:
         )
         assert result.cells[0].output.has_error
         assert result.cells[0].output.error.ename == "AllowListViolation"
-        assert kernel.calls == []
+        # The violating code never reached the kernel (only the benign
+        # loop-completion marker did).
+        assert not any("subprocess" in c for c in kernel.calls)
 
     def test_permissive_cannot_downgrade_data_analysis(self, monkeypatch):
         # K-012: Requesting security="permissive" when server default is "data_analysis" must not downgrade
@@ -153,7 +155,9 @@ class TestExecuteTaskChokePoint:
         )
         assert result.cells[0].output.has_error
         assert result.cells[0].output.error.ename == "AllowListViolation"
-        assert kernel.calls == []
+        # The violating code never reached the kernel (only the benign
+        # loop-completion marker did).
+        assert not any("requests" in c for c in kernel.calls)
 
 
 class TestPerRequestBudget:
