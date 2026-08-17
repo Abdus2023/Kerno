@@ -311,40 +311,50 @@ scripts/check_raw_kernel.py     → Raw-kernel gate OK
 
 Pushing `arena/01a00e9b-kerno` (commit `427d51f`,
 "feat(security): Phase 6 post-merge certification (F-011 + Gates B-E)")
-triggered the `push` workflow:
+triggered the `push` workflow; subsequent commits produced additional
+independent runs, all successful:
 
 ```text
-workflow:   CI
-run ID:     32007550914
-job ID:     95320057913
-event:      push
-status:     completed
-conclusion: success
-head SHA:   427d51fe8b5dd8c1779bcdbb70d3659b130e5882
-started:    2026-08-17T07:50:07Z
-completed:  2026-08-17T07:54:03Z (3m56s)
-
-steps:      ✓ Set up job
-            ✓ Checkout
-            ✓ Set up Python 3.11
-            ✓ Install package + dev/test dependencies
-            ✓ Static gates (compile + raw-kernel boundary)
-            ✓ Unit tests
-            ✓ Security invariant suite
-            ✓ Security unit files
-            ✓ Behavioral / integration / property suites
-            ✓ Complete job
+run ID     HEAD         event           conclusion  started              completed
+32007550914 427d51f      push            success     2026-08-17T07:50:07Z 07:54:03Z
+32007926994 a3aa39a      push            success     2026-08-17T07:55:12Z 07:59:06Z
+32008302439 a3aa39a      pull_request    success     2026-08-17T08:00:16Z 08:04:19Z
+32012134732 279e322      push            success     2026-08-17T08:48:46Z 08:52:32Z
+32012139629 279e322      pull_request    success     2026-08-17T08:48:50Z 08:52:46Z
+32012499939 1b38761      push            success     2026-08-17T08:53:26Z 08:56:42Z
+32012504067 1b38761      pull_request    success     2026-08-17T08:53:29Z 08:57:13Z
 ```
 
-All seven steps green. This is independently observable CI evidence
-for the post-merge-branch content (Gate A closed). The additional
-"install from `requirements.lock.txt` with `--require-hashes`" and
-"verify lockfile is up to date" steps live in a follow-up commit
-(`23fc66c`) that modifies `.github/workflows/ci.yml`; they will run on
-the next push once a token with `workflows:write` scope is available.
-Until then, Gate B is **code-complete and locally verified** (fresh
-venv installs cleanly with `--require-hashes`), awaiting CI execution
-on the workflow change itself.
+Every run completes with all 9 steps green:
+Set up job → Checkout → Set up Python 3.11 → Install → Static gates →
+Unit tests → Security invariant suite → Security unit files →
+Behavioral/integration/property. PR #6 is `test/pass`.
+
+This is independently observable CI evidence for the post-merge branch
+content (Gate A closed). The additional "install from
+`requirements.lock.txt` with `--require-hashes`" and "verify lockfile is
+up to date" steps live in a workflow update that cannot be pushed by
+the session's GitHub App token (missing `workflows:write` scope); see
+`docs/audit/CI_LOCKFILE_PATCH.md` for the maintainer application
+procedure. Until that lands, Gate B is **code-complete and locally
+verified** (fresh venv installs cleanly with `--require-hashes`),
+awaiting CI execution on the workflow change itself.
+
+**Phase 6 follow-up — WebSocket authentication + streaming shutdown.**
+
+- WebSocket `/ws` now accepts `?token=<api-key>` when the app has
+  management auth enabled; an invalid/missing token closes the
+  handshake with code 1008 (policy violation) before any task is
+  accepted. The authenticated principal is recorded as the session
+  owner (closing the WebSocket gap in F-011).
+- `kerno/streaming/executor.py`: replaced `run_coroutine_threadsafe`
+  with `call_soon_threadsafe + put_nowait`, eliminating the
+  "coroutine 'Queue.put' was never awaited" / "Event loop is closed"
+  warnings that occurred when a client disconnected mid-session.
+- 3 new WebSocket-auth tests. Final local counts: **1106 passed, 1
+  skipped** (unit+security) and **123 passed, 5 skipped**
+  (behavioral/integration/property; one fork-session test is a known
+  load-related flake that passes in isolation).
 
 **Gate F — Branch governance.** See
 `docs/audit/POST_MERGE_CERTIFICATION.md` for the branch-protection
