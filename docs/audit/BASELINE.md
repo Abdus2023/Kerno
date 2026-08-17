@@ -126,6 +126,32 @@ tests/property       → 122 passed, 5 skipped
                         passes in isolation)
 ```
 
-**Still open:** F-008 (runtime-origin adversarial tests), F-009 (GitHub
-Actions + branch protection), F-010 (CORS policy), dependency
-lock/constraints, and `CI VERIFIED` evidence for everything above.
+**Still open:** F-009 (GitHub Actions + branch protection), F-010 (CORS
+policy), dependency lock/constraints, and `CI VERIFIED` evidence for
+everything above.
+
+---
+
+## Post-remediation state (Phase 2, 2026-08-17)
+
+Phase 2 (UNIFY) has landed on the session branch and is **tested locally**:
+
+| Item | Status |
+|---|---|
+| Canonical server gateway | 🟢 `build_gateway_engine()` in `kerno/server/security.py` — the single authoritative builder used by `/run`, `/stream`, `/ws`, OpenAI sync/streaming, and `secure_app`; no duplicate security implementations |
+| F-008 runtime-origin authority | 🟢 `execute()`/`stream_execute()`/`execute_silent()` accept only `ORIGIN_AGENT` (ValueError otherwise); `runtime_execute()`/`runtime_stream_execute()` are the only runtime path; `MaterializationExecutor` uses `runtime_execute()`; adversarial origin tests added |
+| K-008 capability escalation | 🟢 19-test adversarial suite (self-grant, cross-agent, scope/subject mutation, expired/revoked parents, skill immutability, origin+grant combination) |
+| P6 scope-containment gap (newly found) | 🟢 FIXED — `CapabilityBroker._normalize_scope` rejects `workspace/../etc/*` as wider than `workspace/*` |
+
+Final local test state (2026-08-17):
+
+```text
+tests/unit           → 1039 passed, 1 skipped
+tests/behavioral +
+tests/integration +
+tests/property       → 124 passed, 5 skipped
+```
+
+**Still open:** F-009 (GitHub Actions + branch protection), F-010 (CORS
+policy), dependency lock/constraints, and `CI VERIFIED` evidence for
+everything above.

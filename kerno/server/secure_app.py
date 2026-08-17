@@ -126,12 +126,16 @@ def create_secure_app(
             # K-001: the authenticated server never executes raw kernel
             # code — every session goes through the choke point.
             # K-012 (F-006): the server default is authoritative — the
-            # client may not downgrade below it.
-            engine = make_server_engine(
+            # client may not downgrade below it. Canonical gateway builder
+            # (same as /run, /stream, /ws and the OpenAI-compatible app).
+            from kerno.server.security import build_gateway_engine
+            engine = build_gateway_engine(
                 kernel,
-                profile          = getattr(request, "security", default_security),
-                server_default   = default_security,
-                allow_downgrade  = False,
+                profile           = getattr(request, "security", default_security),
+                capability_broker = None,
+                budget            = None,
+                server_default    = default_security,
+                allow_downgrade   = False,
             )
 
             # File handling — through the engine choke point (F-001).

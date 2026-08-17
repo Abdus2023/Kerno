@@ -67,6 +67,54 @@ def resolve_effective_profile(
     return req
 
 
+def build_gateway_engine(
+    kernel:            object,
+    *,
+    profile:           Optional[str] = None,
+    capability_broker: Optional[CapabilityBroker] = None,
+    budget:            Optional[ExecutionBudget] = None,
+    server_default:    str = "data_analysis",
+    allow_downgrade:   bool = False,
+    budget_cells:      Optional[int] = None,
+) -> object:
+    """
+    The single authoritative server gateway-engine builder (K-011).
+
+    Every public transport (/run, /stream, /ws, OpenAI-compatible sync +
+    streaming, secure app) must construct its session engine through THIS
+    function and no other. It:
+
+      1. resolves the requested profile against the server-authoritative
+         default (K-012 / F-005 / F-006),
+      2. enforces that clients cannot downgrade (allow_downgrade=False),
+      3. applies the optional per-request execution budget,
+      4. wraps the kernel in the full ExecutionEngine choke point (K-001).
+
+    Keeping one builder prevents the server layer from drifting into
+    independently evolving security implementations.
+    """
+    from kerno.execution.budget import ExecutionBudget
+
+    effective = resolve_effective_profile(
+        profile,
+        server_default  = server_default,
+        allow_downgrade = allow_downgrade,
+    )
+
+    req_budget = None
+    if budget_cells:
+        req_budget = ExecutionBudget(max_executions=int(budget_cells))
+
+    return make_server_engine(
+        kernel,
+        profile            = effective,
+        capability_broker  = capability_broker,
+        budget             = budget or req_budget,
+        server_default     = server_default,
+        allow_downgrade    = allow_downgrade,
+    )
+
+
 def make_server_engine(
     kernel:            object,
     profile:           str = "data_analysis",

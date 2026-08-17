@@ -308,11 +308,18 @@ class MaterializationExecutor:
         timeout: float = 30.0,
         cancel_event: object | None = None,
     ):
-        """Execute server-generated load code through the engine (F-001)."""
-        return self._engine.execute(
+        """Execute server-generated load code through the engine (F-001).
+
+        Uses the engine's trusted runtime_execute() API (F-008): loader
+        code is host-generated template code, so agent capability/allowlist
+        policy is skipped, while the transaction lifecycle (audit, events,
+        effects, budget, finalization) still applies. The public
+        execute()/stream_execute() APIs can never be used to obtain
+        runtime authority.
+        """
+        return self._engine.runtime_execute(
             code,
             timeout       = timeout,
-            origin        = ORIGIN_RUNTIME,
             capabilities  = self._capabilities,
             cancel_event  = cancel_event,
         )

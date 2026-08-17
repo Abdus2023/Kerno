@@ -96,22 +96,18 @@ def create_app(
     pool.start()
 
     def _build_gateway_engine(kernel, profile: str = None, budget_cells: int = None):
-        from kerno.server.security import resolve_effective_profile
+        # K-011/K-012: canonical gateway — a single authoritative builder
+        # for every public transport (F-007 consolidation).
+        from kerno.server.security import build_gateway_engine as _build_gateway
 
-        # K-012: client cannot downgrade below server policy
-        prof = resolve_effective_profile(profile, server_default=default_security, allow_downgrade=False)
-
-        req_budget = None
-        if budget_cells:
-            req_budget = ExecutionBudget(max_executions=int(budget_cells))
-
-        return make_server_engine(
+        return _build_gateway(
             kernel,
-            profile           = prof,
+            profile           = profile,
             capability_broker = capability_broker,
-            budget            = budget or req_budget,
+            budget            = budget,
             server_default    = default_security,
             allow_downgrade   = False,
+            budget_cells      = budget_cells,
         )
 
     # ── Routes ────────────────────────────────────────────────────────────────
@@ -382,20 +378,17 @@ def _execute_task(
 
     bootstrap(kernel)
 
-    # K-001 / K-012: client cannot downgrade server policy
-    from kerno.server.security import resolve_effective_profile
-    prof = resolve_effective_profile(getattr(request, "security", None), server_default=default_security, allow_downgrade=False)
-
-    req_budget = None
-    req_cells = getattr(request, "budget_cells", None)
-    if req_cells:
-        from kerno.execution.budget import ExecutionBudget
-        req_budget = ExecutionBudget(max_executions=int(req_cells))
-    engine = make_server_engine(
+    # K-001 / K-012: client cannot downgrade server policy.
+    # Canonical gateway: one authoritative builder for every transport.
+    from kerno.server.security import build_gateway_engine
+    engine = build_gateway_engine(
         kernel,
-        profile            = prof,
-        capability_broker  = capability_broker,
-        budget             = budget or req_budget,
+        profile           = getattr(request, "security", None),
+        capability_broker = capability_broker,
+        budget            = budget,
+        server_default    = default_security,
+        allow_downgrade   = False,
+        budget_cells      = getattr(request, "budget_cells", None),
     )
 
     factory = {

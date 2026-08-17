@@ -174,17 +174,16 @@ def create_openai_app(
 
                 bootstrap(kernel)
                 # K-001 / K-012 (F-005): client cannot downgrade below the
-                # authoritative server policy. resolve_effective_profile()
-                # inside make_server_engine() upgrades "none"/"permissive"
-                # to server_default when requested.
-                prof = getattr(request, "security", default_security) or default_security
-                engine = make_server_engine(
+                # authoritative server policy. Canonical gateway builder —
+                # the same one used by /run, /stream, /ws and secure_app.
+                from kerno.server.security import build_gateway_engine
+                engine = build_gateway_engine(
                     kernel,
-                    profile            = prof,
-                    capability_broker  = capability_broker,
-                    budget             = budget,
-                    server_default     = default_security,
-                    allow_downgrade    = False,
+                    profile           = getattr(request, "security", default_security),
+                    capability_broker = capability_broker,
+                    budget            = budget,
+                    server_default    = default_security,
+                    allow_downgrade   = False,
                 )
                 factory  = make_reflect if request.loop == "reflect" else make_reactive
                 pipeline = factory(
@@ -239,15 +238,16 @@ def create_openai_app(
         try:
             bootstrap(kernel)
             # K-001 / K-012 (F-005): client cannot downgrade below the
-            # authoritative server policy (same wiring as the sync path).
-            prof = getattr(request, "security", default_security) or default_security
-            engine = make_server_engine(
+            # authoritative server policy. Canonical gateway builder (same
+            # as the sync path and every other transport).
+            from kerno.server.security import build_gateway_engine
+            engine = build_gateway_engine(
                 kernel,
-                profile            = prof,
-                capability_broker  = capability_broker,
-                budget             = budget,
-                server_default     = default_security,
-                allow_downgrade    = False,
+                profile           = getattr(request, "security", default_security),
+                capability_broker = capability_broker,
+                budget            = budget,
+                server_default    = default_security,
+                allow_downgrade   = False,
             )
             factory  = make_reflect if request.loop == "reflect" else make_reactive
             pipeline = factory(

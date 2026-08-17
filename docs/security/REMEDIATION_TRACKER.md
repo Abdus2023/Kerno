@@ -29,10 +29,11 @@ baseline `36943e1c854d576f1d3bbff96481ae57e7fb94b5`).
 | F-005 | OpenAI downgrade | `server_default` wiring | endpoint tests in `test_server_endpoint_security.py` | Pending | 🟢 IMPLEMENTED + TESTED LOCALLY |
 | F-006 | Secure-app downgrade | `server_default` wiring | endpoint tests in `test_server_endpoint_security.py` | Pending | 🟢 IMPLEMENTED + TESTED LOCALLY |
 | F-007 | Missing endpoint tests | integration suite | sync + streaming endpoint tests for OpenAI + secure app (main `/run` `/stream` `/ws` already covered by `test_server_security.py`) | Pending | 🟢 IMPLEMENTED (OpenAI + secure endpoints) |
-| F-008 | Runtime-origin authority | private capability / trusted API | escalation tests | Pending | 🟡 OPEN (Phase 2) |
+| F-008 | Runtime-origin authority | `runtime_execute()`/`runtime_stream_execute()` trusted APIs; public `execute()`/`stream_execute()`/`execute_silent()` reject `ORIGIN_RUNTIME` | `TestOriginAuthorityBoundary` + `tests/unit/test_capability_escalation.py` | Pending | 🟢 IMPLEMENTED + TESTED LOCALLY |
 | F-009 | CI evidence | GitHub Actions workflow | workflow run | Pending | 🔴 OPEN |
 | F-010 | CORS | explicit origins | CORS tests | Pending | 🟡 OPEN |
 | — | Baseline test bugs (5 pre-existing failures + 1 pool-stat bug + 1 flaky) | test corrections | `tests/unit` suite green | Pending | 🟢 FIXED (6 fixed; `test_unused_token_runs_normally` flaky under kernel contention, passes in isolation) |
+| — | P6 scope-containment gap (NEW, found by F-008 adversarial tests) | scope normalization in `CapabilityBroker` (`_normalize_scope`) | traversal cases in `test_capability_escalation.py` | Pending | 🟢 FIXED — `workspace/../etc/*` no longer contained in `workspace/*` |
 
 ---
 
@@ -96,6 +97,46 @@ tests/property                   → 122 passed, 5 skipped
 ```
 
 ---
+
+### Pass 3 — Phase 2 (UNIFY) implemented + tested locally
+
+**2026-08-17** — Phase 2 landed on `arena/01a00e08-kerno`:
+
+- **Canonical gateway (items 4/5/6)** — `kerno/server/security.py` now owns
+  `build_gateway_engine()`, the SINGLE authoritative engine builder for every
+  public transport (profile resolution against `server_default`, downgrade
+  prevention, per-request budget, ExecutionEngine choke point). `app.py`
+  (`/run`, `/stream`, `/ws`, `_execute_task`), `openai_compat.py` (sync +
+  streaming), and `secure_app.py` all delegate to it — no independently
+  evolving security implementations remain.
+- **F-008 runtime-origin authority** — the public `execute()` /
+  `stream_execute()` / `execute_silent()` APIs now accept ONLY `ORIGIN_AGENT`
+  and raise `ValueError` on `ORIGIN_RUNTIME` (or any other origin). Trusted
+  host code obtains runtime semantics exclusively through the new
+  `runtime_execute()` / `runtime_stream_execute()` APIs; `MaterializationExecutor`
+  now uses `runtime_execute()`. Adversarial `TestOriginAuthorityBoundary`
+  suite proves an agent cannot manufacture runtime authority even with
+  grants.
+- **K-008 capability escalation suite** — new `tests/unit/test_capability_escalation.py`
+  (19 tests): self-grant prevention (broker fail-closed, no grant surface on
+  the agent-facing executor), cross-agent grant isolation, scope widening,
+  subject mutation, expired parents, revoked parents (cascade), skill
+  capability immutability (`grant_skill_capabilities` snapshot semantics),
+  and the runtime-origin + self-grant combination.
+- **NEW FINDING FIXED — P6 scope-containment gap**: the adversarial suite
+  caught `fnmatch` accepting `workspace/../etc/*` as contained in
+  `workspace/*`. `CapabilityBroker` now normalizes scope patterns
+  (`_normalize_scope`) before containment checks — `..` traversal can no
+  longer widen a child grant's effective coverage (the audit narrative's
+  "hardening opportunity" is now closed).
+
+**Test results (2026-08-17):**
+
+```text
+tests/unit                       → 1039 passed, 1 skipped
+tests/behavioral + integration +
+tests/property                   → 124 passed, 5 skipped
+```
 
 ## Decision gate
 

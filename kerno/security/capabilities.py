@@ -88,6 +88,44 @@ CAP_HUMAN_APPROVAL  = "human.approval"
 
 WILDCARD = "*"
 
+
+def _normalize_scope(scope: str) -> str:
+    """
+    Lexically normalize a scope pattern (P6 hardening).
+
+    fnmatch containment is string-based, so a scope like
+    'workspace/../etc/*' would otherwise be treated as contained in
+    'workspace/*' even though its normalized coverage is '/etc/*' — a
+    traversal smuggling path. Normalizing both sides before fnmatch makes
+    containment hold on the canonical path form:
+
+        'workspace/../etc/*' → 'etc/*'   (no longer contained in 'workspace/*')
+        '/etc/*'             → '/etc/*'  (absolute marker preserved)
+        '../etc'             → '../etc'  (leading '..' kept — fails containment)
+
+    Wildcard-adjacent '..' is left untouched (it cannot be resolved
+    lexically), which errs on the side of REJECTION.
+    """
+    if not scope or scope == "*":
+        return scope
+    parts = scope.split("/")
+    out: list[str] = []
+    for i, part in enumerate(parts):
+        if part == "":
+            if i == 0:
+                out.append("")          # preserve leading '/' (absolute)
+            continue                     # collapse '//'
+        if part == ".":
+            continue
+        if part == "..":
+            if out and out[-1] != "*":
+                out.pop()
+            else:
+                out.append(part)
+        else:
+            out.append(part)
+    return "/".join(out)
+
 # ── Preset profiles (mirrors of the allowlist profiles) ───────────────────────
 
 PROFILE_READ_ONLY = frozenset({
@@ -277,7 +315,10 @@ class CapabilityBroker:
         cap = grant.capability
         if cap.name != WILDCARD and cap.name != name:
             return False
-        if not fnmatch(scope, cap.scope):
+        # P6: containment is evaluated on NORMALIZED scope forms so '..'
+        # traversal cannot widen coverage (e.g. 'workspace/../etc/*' is
+        # not contained in 'workspace/*').
+        if not fnmatch(_normalize_scope(scope), _normalize_scope(cap.scope)):
             return False
         # Every grant constraint must be satisfied by the request
         for key, value in cap.constraints.items():
@@ -305,8 +346,10 @@ class CapabilityBroker:
                 child.name, child.scope, subject,
                 f"not a subset of parent capability '{pcap.name}'",
             )
-        # Scope: child scope must be within the parent's pattern
-        if not fnmatch(child.scope, pcap.scope):
+        # Scope: child scope must be within the parent's pattern.
+        # P6: evaluated on NORMALIZED forms — 'workspace/../etc/*' is
+        # rejected as wider than 'workspace/*'.
+        if not fnmatch(_normalize_scope(child.scope), _normalize_scope(pcap.scope)):
             raise CapabilityViolation(
                 child.name, child.scope, subject,
                 f"scope '{child.scope}' exceeds parent scope '{pcap.scope}'",
