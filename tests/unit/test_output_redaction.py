@@ -74,7 +74,7 @@ class TestOutputRedaction:
     def test_runtime_origin_output_untouched(self):
         # Trusted host code's output is not scrubbed (comms/setup)
         engine = make_engine(PrintingKernel(stdout="setup " + SECRET))
-        out = engine.execute("setup()", origin=ORIGIN_RUNTIME)
+        out = engine.runtime_execute("setup()")
         assert SECRET in out.stdout
 
     def test_redact_outputs_disabled_leaves_output(self):

@@ -32,6 +32,8 @@ repository source, test suite, and release artifacts.
 | [`16-next-steps.md`](16-next-steps.md) | The forward roadmap |
 | [`17-final-assessment.md`](17-final-assessment.md) | Maturity assessment (K0–K3) |
 | [`18-key-conclusion.md`](18-key-conclusion.md) | The one-paragraph verdict |
+| [`19-verification-passes-deep-audit.md`](19-verification-passes-deep-audit.md) | Live source-level verification log against merged `main` (baseline `36943e1c`): K-001/K-008 engine evidence, server-boundary findings F1–F5, and the GitHub CI/governance gap |
+| [`20-remediation-plan.md`](20-remediation-plan.md) | Proposed hardening + evidence-reconciliation program: finding IDs F-001…F-010, P0–P3 remediation items, phased implementation order, definition of done, and the remediation tracker |
 
 ## Headline result
 

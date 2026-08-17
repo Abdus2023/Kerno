@@ -12,17 +12,320 @@ Kerno materializes them into:
   - DataFrames in namespace (CSV, Excel, Parquet, JSON)
   - PIL Images in namespace (PNG, JPG, WebP)
   - Extracted text in namespace (PDF, DOCX, TXT)
+
+Security boundary (F-001 / K-001):
+  FileMaterializer NEVER owns a raw kernel. It receives a narrow
+  MaterializationExecutor that exposes exactly one operation —
+  execute_load_code() — which routes through the ExecutionEngine choke
+  point (audit records, event stream, effects, budget, finalization).
+  The loader code is server-generated template code (trusted host code,
+  origin=ORIGIN_RUNTIME — the same trust class as skill bootstrap).
+
+  URL ingestion (F-002) is policy-checked: http/https only, private /
+  loopback / link-local / CGNAT addresses rejected (including every
+  redirect target), download size capped while streaming, connect/read
+  timeouts enforced. File materialization (F-003) is bounded: per-file,
+  per-request count, and total-byte limits, with base64 size rejected
+  BEFORE decode/allocation.
 """
 
 from __future__ import annotations
 
 import base64
-import json
-import os
-import tempfile
-from dataclasses import dataclass
-from pathlib     import Path
-from typing      import Optional
+import ipaddress
+import shutil
+import socket
+import time
+import urllib.parse
+import urllib.request
+import uuid
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from kerno.execution.engine import ORIGIN_RUNTIME
+from kerno.telemetry.logger  import get_logger
+
+log = get_logger("kerno.server.files")
+
+# ── Materialization limits (F-003) ───────────────────────────────────────────
+
+DEFAULT_MAX_FILE_BYTES            = 50 * 1024 * 1024    # 50 MB per file
+DEFAULT_MAX_TOTAL_FILE_BYTES      = 100 * 1024 * 1024   # 100 MB per request
+DEFAULT_MAX_FILES_PER_REQUEST     = 20
+DEFAULT_MAX_URL_DOWNLOAD_BYTES    = 50 * 1024 * 1024    # 50 MB per URL fetch
+DEFAULT_MAX_MATERIALIZATION_TIME  = 60.0                # seconds, overall
+DEFAULT_URL_CONNECT_TIMEOUT       = 10.0                # seconds
+DEFAULT_URL_READ_TIMEOUT          = 30.0                # seconds
+DEFAULT_ALLOWED_URL_SCHEMES       = frozenset({"http", "https"})
+
+
+@dataclass(frozen=True)
+class MaterializationLimits:
+    """
+    Bounds for file materialization (F-003).
+
+    The server measures ACTUAL bytes; the client-declared `size` field is
+    never trusted.
+    """
+
+    max_file_bytes:           int = DEFAULT_MAX_FILE_BYTES
+    max_total_file_bytes:     int = DEFAULT_MAX_TOTAL_FILE_BYTES
+    max_files_per_request:    int = DEFAULT_MAX_FILES_PER_REQUEST
+    max_url_download_bytes:   int = DEFAULT_MAX_URL_DOWNLOAD_BYTES
+    max_materialization_time: float = DEFAULT_MAX_MATERIALIZATION_TIME
+    url_connect_timeout:      float = DEFAULT_URL_CONNECT_TIMEOUT
+    url_read_timeout:         float = DEFAULT_URL_READ_TIMEOUT
+    allowed_url_schemes:      frozenset = field(default_factory=lambda: DEFAULT_ALLOWED_URL_SCHEMES)
+
+
+def default_limits() -> MaterializationLimits:
+    """Default materialization bounds (override per deployment as needed)."""
+    return MaterializationLimits()
+
+
+class MaterializationLimitError(Exception):
+    """Raised when a materialization resource limit is exceeded (F-003)."""
+
+
+class UrlPolicyError(Exception):
+    """Raised when a download URL violates the outbound URL policy (F-002)."""
+
+
+# ── Outbound URL policy (F-002) ──────────────────────────────────────────────
+
+# Addresses that must never be reachable via server-side file materialization.
+_PRIVATE_NETWORKS = [
+    ipaddress.ip_network("0.0.0.0/8"),        # "this network" / invalid
+    ipaddress.ip_network("10.0.0.0/8"),       # RFC 1918
+    ipaddress.ip_network("100.64.0.0/10"),    # CGNAT (RFC 6598)
+    ipaddress.ip_network("127.0.0.0/8"),      # loopback
+    ipaddress.ip_network("169.254.0.0/16"),   # link-local
+    ipaddress.ip_network("172.16.0.0/12"),    # RFC 1918
+    ipaddress.ip_network("192.168.0.0/16"),   # RFC 1918
+    ipaddress.ip_network("198.18.0.0/15"),    # benchmarking (RFC 2544)
+    ipaddress.ip_network("224.0.0.0/4"),      # multicast
+    ipaddress.ip_network("::1/128"),          # IPv6 loopback
+    ipaddress.ip_network("fc00::/7"),         # IPv6 unique local
+    ipaddress.ip_network("fe80::/10"),        # IPv6 link-local
+    ipaddress.ip_network("ff00::/8"),         # IPv6 multicast
+]
+
+
+def _is_private_address(ip: ipaddress._BaseAddress) -> bool:
+    return any(ip in net for net in _PRIVATE_NETWORKS)
+
+
+def validate_download_url(
+    url: str,
+    allowed_schemes: frozenset | None = None,
+) -> urllib.parse.ParseResult:
+    """
+    Validate an outbound download URL against the F-002 policy.
+
+    Rejects:
+      - unsupported schemes (anything but http/https by default)
+      - URLs embedding credentials (userinfo)
+      - literal private / loopback / link-local / CGNAT IP addresses
+      - hostnames that resolve (in whole or in part) to a non-public
+        address (DNS-rebinding resistance: EVERY resolved address is
+        checked, not just the first)
+
+    Returns the parsed URL on success; raises UrlPolicyError otherwise.
+    """
+    schemes = allowed_schemes if allowed_schemes is not None else DEFAULT_ALLOWED_URL_SCHEMES
+
+    if not url or not isinstance(url, str):
+        raise UrlPolicyError("empty or invalid URL")
+
+    parsed = urllib.parse.urlparse(url)
+
+    if parsed.scheme.lower() not in schemes:
+        raise UrlPolicyError(
+            "scheme {!r} is not allowed (allowed: {})".format(
+                parsed.scheme or "<none>", ", ".join(sorted(schemes))
+            )
+        )
+
+    if parsed.username or parsed.password:
+        raise UrlPolicyError("URLs with embedded credentials are not allowed")
+
+    host = parsed.hostname
+    if not host:
+        raise UrlPolicyError("URL has no hostname")
+
+    # Literal IP address → check directly.
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        ip = None
+    if ip is not None:
+        if _is_private_address(ip):
+            raise UrlPolicyError(f"URL targets a non-public address: {ip}")
+        return parsed
+
+    # Hostname → resolve and require ALL addresses to be public.
+    try:
+        infos = socket.getaddrinfo(
+            host,
+            parsed.port or (443 if parsed.scheme.lower() == "https" else 80),
+            proto=socket.IPPROTO_TCP,
+        )
+    except socket.gaierror as exc:
+        raise UrlPolicyError(f"cannot resolve host: {host}") from exc
+    if not infos:
+        raise UrlPolicyError(f"host resolves to no addresses: {host}")
+
+    for info in infos:
+        try:
+            addr = ipaddress.ip_address(info[4][0])
+        except ValueError:
+            continue
+        if _is_private_address(addr):
+            raise UrlPolicyError(
+                f"host {host} resolves to a non-public address: {addr}"
+            )
+    return parsed
+
+
+class _ValidatingRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """
+    Re-validates EVERY redirect target against the F-002 URL policy.
+
+    Without this, a public URL redirecting to http://127.0.0.1:8000/ would
+    bypass the initial validation.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        validate_download_url(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def _build_download_opener() -> urllib.request.OpenerDirector:
+    """Opener with redirect-revalidating handler (F-002)."""
+    return urllib.request.build_opener(_ValidatingRedirectHandler())
+
+
+def _download_to_file(
+    url: str,
+    dest: Path,
+    *,
+    max_bytes: int,
+    connect_timeout: float,
+    read_timeout: float,
+    overall_timeout: float,
+    opener: urllib.request.OpenerDirector | None = None,
+) -> int:
+    """
+    Download `url` to `dest` enforcing scheme/IP policy, per-redirect
+    validation, connect/read timeouts, and a streaming size cap.
+
+    Returns the number of bytes written. Raises UrlPolicyError (policy),
+    MaterializationLimitError (size/timeout), or the underlying error.
+    """
+    validate_download_url(url)
+    opener = opener or _build_download_opener()
+    deadline = time.monotonic() + overall_timeout
+
+    try:
+        resp = opener.open(url, timeout=connect_timeout)
+    except UrlPolicyError:
+        raise
+    except TimeoutError as exc:
+        raise MaterializationLimitError("URL download timed out (connect)") from exc
+
+    with resp:
+        # Reject on declared Content-Length before reading anything.
+        declared = resp.headers.get("Content-Length")
+        if declared:
+            try:
+                if int(declared) > max_bytes:
+                    raise MaterializationLimitError(
+                        f"URL download exceeds size limit (declared {declared} bytes, limit {max_bytes})"
+                    )
+            except ValueError:
+                pass
+
+        total = 0
+        with open(dest, "wb") as f:
+            while True:
+                if time.monotonic() > deadline:
+                    raise MaterializationLimitError(
+                        f"URL download exceeded overall time limit ({round(overall_timeout, 1)}s)"
+                    )
+                try:
+                    chunk = resp.read(64 * 1024)
+                except TimeoutError as exc:
+                    raise MaterializationLimitError(
+                        "URL download timed out (read)"
+                    ) from exc
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > max_bytes:
+                    raise MaterializationLimitError(
+                        f"URL download exceeds size limit ({total} bytes, limit {max_bytes})"
+                    )
+                f.write(chunk)
+    return total
+
+
+def _estimate_base64_size(data_b64: str) -> int:
+    """Upper-bound estimate of the decoded size WITHOUT decoding (F-003)."""
+    compact = "".join(data_b64.split())
+    padding = len(compact) - len(compact.rstrip("="))
+    return max(0, (len(compact) * 3) // 4 - padding)
+
+
+# ── Narrow execution authority (F-001) ───────────────────────────────────────
+
+class MaterializationExecutor:
+    """
+    The ONLY execution authority available to FileMaterializer (F-001).
+
+    Exposes exactly one operation — execute_load_code() — routed through
+    the ExecutionEngine choke point. Loader code is server-generated
+    template code, i.e. trusted host code, so it runs with
+    origin=ORIGIN_RUNTIME (the same trust class as skill bootstrap); the
+    engine still applies the transaction lifecycle: execution_id,
+    sequence, audit records, event stream, effect declaration/
+    observation, budget (when the engine is wrapped), cancellation, and
+    guaranteed finalization.
+
+    This class can never be used as a general-purpose executor, and the
+    materializer can never reach the raw kernel.
+    """
+
+    def __init__(self, engine: object, *, capabilities: frozenset = frozenset()):
+        if not hasattr(engine, "execute"):
+            raise TypeError(
+                "MaterializationExecutor requires an Executor-shaped object "
+                f"(e.g. ExecutionEngine), got {type(engine).__name__!r}"
+            )
+        self._engine       = engine
+        self._capabilities = frozenset(capabilities)
+
+    def execute_load_code(
+        self,
+        code: str,
+        *,
+        timeout: float = 30.0,
+        cancel_event: object | None = None,
+    ):
+        """Execute server-generated load code through the engine (F-001).
+
+        Uses the engine's trusted runtime_execute() API (F-008): loader
+        code is host-generated template code, so agent capability/allowlist
+        policy is skipped, while the transaction lifecycle (audit, events,
+        effects, budget, finalization) still applies. The public
+        execute()/stream_execute() APIs can never be used to obtain
+        runtime authority.
+        """
+        return self._engine.runtime_execute(
+            code,
+            timeout       = timeout,
+            capabilities  = self._capabilities,
+            cancel_event  = cancel_event,
+        )
 
 
 @dataclass
@@ -44,10 +347,16 @@ class FileMaterializer:
     available inside the kernel.
 
     Usage:
-        materializer = FileMaterializer(kernel, upload_dir="/tmp/kerno_uploads")
+        executor   = MaterializationExecutor(engine)   # engine = ExecutionEngine
+        materializer = FileMaterializer(executor, upload_dir="/tmp/kerno_uploads")
         files = materializer.process(message_files)
         # files: list[MaterializedFile]
         # Each file is now accessible in the kernel namespace
+
+    The constructor REQUIRES a MaterializationExecutor-shaped object
+    (anything with execute_load_code()); a raw KernelRuntime or a
+    general-purpose executor is rejected structurally — FileMaterializer
+    cannot execute code outside the engine choke point (F-001).
     """
 
     SUPPORTED_TYPES = {
@@ -118,13 +427,28 @@ except ImportError:
 
     def __init__(
         self,
-        kernel,
+        executor: object,
         upload_dir: str = "/tmp/kerno_uploads",
+        limits: MaterializationLimits | None = None,
     ):
-        self.kernel     = kernel
-        self.upload_dir = Path(upload_dir)
-        self.upload_dir.mkdir(parents=True, exist_ok=True)
-        self._counter   = 0
+        if not hasattr(executor, "execute_load_code"):
+            raise TypeError(
+                "FileMaterializer requires a MaterializationExecutor (any object "
+                "with execute_load_code()); raw kernels and general-purpose "
+                "executors are not accepted — materialization must run through "
+                "the ExecutionEngine choke point (F-001)."
+            )
+        self._executor    = executor
+        self._limits      = limits or default_limits()
+        self.upload_dir   = Path(upload_dir)
+        # Per-instance (per-request) storage isolation (F-004): the original
+        # filename is metadata, never the storage identity.
+        self._session_dir = self.upload_dir / uuid.uuid4().hex
+        self._session_dir.mkdir(parents=True, exist_ok=True)
+        self._counter     = 0
+        self._total_bytes = 0
+
+    # ── Public API ────────────────────────────────────────────────────────────
 
     def process(self, files: list[dict]) -> list[MaterializedFile]:
         """
@@ -139,6 +463,10 @@ except ImportError:
                 "size":    12345,
             }
         """
+        if len(files) > self._limits.max_files_per_request:
+            raise MaterializationLimitError(
+                f"too many files in request ({len(files)} > limit {self._limits.max_files_per_request})"
+            )
         materialized = []
         for file_info in files:
             result = self._process_one(file_info)
@@ -185,17 +513,34 @@ except ImportError:
         )
         return "\n".join(lines)
 
+    def cleanup(self) -> None:
+        """
+        Remove this instance's storage directory (F-004 lifecycle).
+
+        Guaranteed-cleanup is the caller's responsibility (try/finally);
+        this removes the per-request directory so uploads cannot pile up
+        in /tmp/kerno_uploads.
+        """
+        try:
+            if self._session_dir.exists():
+                shutil.rmtree(self._session_dir, ignore_errors=True)
+        except Exception as exc:  # pragma: no cover - defensive
+            log.warning("Materialization cleanup error", reason=str(exc)[:200])
+
     # ── Internal ──────────────────────────────────────────────────────────────
 
-    def _process_one(self, file_info: dict) -> Optional[MaterializedFile]:
+    def _process_one(self, file_info: dict) -> MaterializedFile | None:
         """Save one file to disk and inject it into the kernel."""
+        if not isinstance(file_info, dict):
+            return None
+
         name      = file_info.get("name", f"file_{self._counter}")
         mime      = file_info.get("type", "application/octet-stream")
         data_b64  = file_info.get("data", "")
         url       = file_info.get("url", "")
         size      = file_info.get("size", 0)
 
-        # Write to disk
+        # Write to disk (enforces F-002 URL policy + F-003 size limits)
         local_path = self._save_file(name, data_b64, url)
         if not local_path:
             return None
@@ -214,12 +559,18 @@ except ImportError:
 
         load_code = template.format(path=local_path, varname=varname)
 
-        # Execute in kernel
-        output = self.kernel.execute(load_code, timeout=30)
+        # Execute through the engine choke point (F-001) — the raw kernel
+        # is never reachable from here.
+        output = self._executor.execute_load_code(load_code, timeout=30)
         if output.has_error:
-            print(
-                f"[kerno] File load warning: {name}: "
-                f"{output.error.ename}: {output.error.evalue}"
+            # Observability (P2.13): decision + file identity, never the
+            # file contents.
+            log.warning(
+                "Materialization load failed",
+                file     = name,
+                source   = "url" if url else "base64",
+                ename    = output.error.ename if output.error else "Error",
+                evalue   = output.error.evalue if output.error else "",
             )
             return None
 
@@ -232,33 +583,78 @@ except ImportError:
             load_code     = load_code,
         )
 
-    def _save_file(self, name: str, data_b64: str, url: str) -> Optional[str]:
+    def _save_file(self, name: str, data_b64: str, url: str) -> str | None:
         """Save file content to disk, from either base64 or URL."""
-        safe_name  = "".join(c for c in name if c.isalnum() or c in "._-")
-        local_path = str(self.upload_dir / safe_name)
+        safe_name = "".join(c for c in name if c.isalnum() or c in "._-") or f"file_{self._counter}"
+        local_path = str(self._session_dir / safe_name)
 
         if data_b64:
-            # Decode base64
+            # F-003: reject before decode/allocation based on encoded size.
+            estimated = _estimate_base64_size(data_b64)
+            if estimated > self._limits.max_file_bytes:
+                raise MaterializationLimitError(
+                    f"base64 file exceeds size limit (estimated {estimated} bytes, limit {self._limits.max_file_bytes})"
+                )
             try:
                 content = base64.b64decode(data_b64)
-                with open(local_path, "wb") as f:
-                    f.write(content)
-                return local_path
             except Exception as e:
-                print(f"[kerno] Base64 decode error for {name}: {e}")
+                log.warning(
+                    "Materialization base64 decode failed",
+                    file   = name,
+                    source = "base64",
+                    reason = str(e)[:200],
+                )
                 return None
+            if len(content) > self._limits.max_file_bytes:  # defense in depth
+                raise MaterializationLimitError(
+                    f"base64 file exceeds size limit ({len(content)} bytes, limit {self._limits.max_file_bytes})"
+                )
+            with open(local_path, "wb") as f:
+                f.write(content)
 
         elif url:
-            # Download from URL
+            # F-002: policy-checked, size-capped, timed download.
             try:
-                import urllib.request
-                urllib.request.urlretrieve(url, local_path)
-                return local_path
-            except Exception as e:
-                print(f"[kerno] URL download error for {name}: {e}")
-                return None
+                _download_to_file(
+                    url,
+                    Path(local_path),
+                    max_bytes      = self._limits.max_url_download_bytes,
+                    connect_timeout = self._limits.url_connect_timeout,
+                    read_timeout   = self._limits.url_read_timeout,
+                    overall_timeout = self._limits.max_materialization_time,
+                )
+            except UrlPolicyError as exc:
+                # Observability (P2.13): log hostname + decision, never the
+                # full URL (it could carry credentials) or any contents.
+                host = urllib.parse.urlparse(url).hostname or "<none>"
+                log.warning(
+                    "Materialization URL rejected by policy",
+                    file     = name,
+                    source   = "url",
+                    hostname = host,
+                    reason   = str(exc),
+                )
+                raise
+            except MaterializationLimitError as exc:
+                log.warning(
+                    "Materialization limit exceeded",
+                    file   = name,
+                    source = "url",
+                    reason = str(exc),
+                )
+                raise
 
-        return None
+        else:
+            log.debug("Materialization skipped: no data or url", file=name)
+            return None
+
+        size = Path(local_path).stat().st_size
+        self._total_bytes += size
+        if self._total_bytes > self._limits.max_total_file_bytes:
+            raise MaterializationLimitError(
+                f"total materialized size exceeds limit ({self._total_bytes} bytes, limit {self._limits.max_total_file_bytes})"
+            )
+        return local_path
 
     @staticmethod
     def _classify(mime: str, name: str) -> str:
@@ -278,12 +674,12 @@ except ImportError:
         stem = Path(filename).stem
         safe = re.sub(r"[^a-zA-Z0-9_]", "_", stem)
         safe = re.sub(r"_+", "_", safe).strip("_")
-        if safe[0].isdigit():
+        if safe and safe[0].isdigit():
             safe = f"file_{safe}"
         return safe or "uploaded_file"
 
     @staticmethod
-    def _normalize_content_part(part: dict) -> Optional[dict]:
+    def _normalize_content_part(part: dict) -> dict | None:
         """Normalize a message content part into file_info format."""
         if part.get("type") == "image_url":
             url_data = part.get("image_url", {})

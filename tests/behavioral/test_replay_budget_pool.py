@@ -186,8 +186,17 @@ class TestKernelPoolScheduler:
                 assert f"{i}" in out.stdout
                 pool.release(task_id, reason="complete")
 
-            # Check stats
+            # Check stats — release() resets kernels asynchronously, so
+            # wait for both kernels to return to the available queue.
+            import time
+            deadline = time.monotonic() + 15.0
             stats = pool.stats
-            assert stats["size"] == 2
+            while (
+                time.monotonic() < deadline
+                and not (stats["available"] == 2 and stats["active"] == 0)
+            ):
+                time.sleep(0.2)
+                stats = pool.stats
+            assert stats["total"] == 2
             assert stats["active"] == 0
             assert stats["available"] == 2

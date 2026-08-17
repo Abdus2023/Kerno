@@ -10,7 +10,9 @@ PYTEST ?= .venv/bin/pytest
 ci:
 	$(PY) -m compileall -q kerno tests
 	$(PY) -c "import kerno; print('kerno imports OK')"
+	$(PY) scripts/check_raw_kernel.py
 	$(PYTEST) tests/unit -q
+	$(PYTEST) tests/security -q
 	$(PYTEST) tests/unit/test_security.py tests/unit/test_execution_engine.py tests/unit/test_capability_broker.py tests/unit/test_secrets.py tests/unit/test_isolation.py tests/unit/test_invariants.py -q
 	$(PYTEST) tests/behavioral tests/integration tests/property -q
 

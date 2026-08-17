@@ -59,6 +59,7 @@ def create_openai_app(
     capability_broker: Optional[object] = None,
     budget:            Optional[object] = None,
     default_security:  str  = "data_analysis",
+    cors_origins:      Optional[list[str]] = None,
 ) -> "FastAPI":
     """
     Create an OpenAI-compatible FastAPI application.
@@ -90,12 +91,17 @@ def create_openai_app(
     pool = KernelPool(size=pool_size, skills_path=skills_path)
     pool.start()
 
+    # F-010: explicit-origin CORS policy — the wildcard "*" is never
+    # implicit. Pass cors_origins (or set KERNO_CORS_ORIGINS) for
+    # cross-origin deployments; credentials require explicit origins.
+    from kerno.server.security import resolve_cors_origins, DEFAULT_CORS_METHODS, DEFAULT_CORS_HEADERS
+    origins = resolve_cors_origins(cors_origins)
     app.add_middleware(
         CORSMiddleware,
-        allow_origins  = ["*"],
-        allow_credentials = False,
-        allow_methods  = ["*"],
-        allow_headers  = ["*"],
+        allow_origins  = origins,
+        allow_credentials = bool(origins) and "*" not in origins,
+        allow_methods  = DEFAULT_CORS_METHODS,
+        allow_headers  = DEFAULT_CORS_HEADERS,
     )
 
     # ── Health check ─────────────────────────────────────────────────────────
@@ -173,15 +179,18 @@ def create_openai_app(
                 from kerno.server.security  import make_server_engine
 
                 bootstrap(kernel)
-                # K-001 / K-012: client cannot downgrade below server policy
-                prof = getattr(request, "security", default_security) or default_security
-                if prof == "none":
-                    prof = default_security
-                engine = make_server_engine(
+                # K-001 / K-012 (F-005): client cannot downgrade below the
+                # authoritative server policy. Canonical gateway builder —
+                # the same one used by /run, /stream, /ws and secure_app.
+                from kerno.server.security import build_gateway_engine
+                engine = build_gateway_engine(
                     kernel,
-                    profile            = prof,
-                    capability_broker  = capability_broker,
-                    budget             = budget,
+                    profile           = getattr(request, "security", default_security),
+                    capability_broker = capability_broker,
+                    budget            = budget,
+                    server_default    = default_security,
+                    allow_downgrade   = False,
+                    transport         = "openai",
                 )
                 factory  = make_reflect if request.loop == "reflect" else make_reactive
                 pipeline = factory(
@@ -235,15 +244,18 @@ def create_openai_app(
 
         try:
             bootstrap(kernel)
-            # K-001 / K-012: client cannot downgrade below server policy
-            prof = getattr(request, "security", default_security) or default_security
-            if prof == "none":
-                prof = default_security
-            engine = make_server_engine(
+            # K-001 / K-012 (F-005): client cannot downgrade below the
+            # authoritative server policy. Canonical gateway builder (same
+            # as the sync path and every other transport).
+            from kerno.server.security import build_gateway_engine
+            engine = build_gateway_engine(
                 kernel,
-                profile            = prof,
-                capability_broker  = capability_broker,
-                budget             = budget,
+                profile           = getattr(request, "security", default_security),
+                capability_broker = capability_broker,
+                budget            = budget,
+                server_default    = default_security,
+                allow_downgrade   = False,
+                transport         = "openai-stream",
             )
             factory  = make_reflect if request.loop == "reflect" else make_reactive
             pipeline = factory(

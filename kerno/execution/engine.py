@@ -22,10 +22,18 @@ Authorization/policy violations never touch the kernel: the agent loop
 receives a synthetic CellOutput error (ename="AllowListViolation" or
 "CapabilityViolation") and can recover, exactly like any other failed cell.
 
-Origin model:
+Origin model (F-008):
     ORIGIN_AGENT   — LLM-generated code. Authorization + policy enforced.
     ORIGIN_RUNTIME — trusted host code (setup, comms, plugins).
                      Skips both. Never use for LLM-generated text.
+
+Authority boundary (F-008):
+    The public execute()/stream_execute()/execute_silent() APIs accept ONLY
+    ORIGIN_AGENT — an agent-facing caller can never manufacture runtime
+    authority. Trusted host code obtains ORIGIN_RUNTIME semantics through
+    the dedicated runtime_execute()/runtime_stream_execute() APIs, which
+    are never exposed to agent code (e.g. MaterializationExecutor wraps
+    runtime_execute()).
 """
 
 from __future__ import annotations
@@ -282,6 +290,7 @@ class ExecutionEngine:
                     action_sm    = action_sm,
                     event_type   = EVT_CAPABILITY_DENIED,
                     event_payload = {"capability": exc.name, "subject": exc.subject},
+                    subject      = subject,
                 )
                 return _TxContext(
                     allowed            = False,
@@ -310,6 +319,7 @@ class ExecutionEngine:
                     action_sm    = action_sm,
                     event_type   = EVT_APPROVAL_DENIED,
                     event_payload = {"reason": "no_gate"},
+                    subject      = subject,
                 )
                 return _TxContext(
                     allowed            = False,
@@ -342,6 +352,7 @@ class ExecutionEngine:
                     action_sm    = action_sm,
                     event_type   = EVT_APPROVAL_DENIED,
                     event_payload = {"reason": "denied"},
+                    subject      = subject,
                 )
                 return _TxContext(
                     allowed            = False,
@@ -403,6 +414,7 @@ class ExecutionEngine:
                     action_sm    = action_sm,
                     event_type   = EVT_POLICY_BLOCKED,
                     event_payload = {"rule": exc.rule},
+                    subject      = subject,
                 )
                 return _TxContext(
                     allowed            = False,
@@ -507,7 +519,66 @@ class ExecutionEngine:
     ) -> CellOutput:
         """
         Execute code through the authorization + policy boundary.
+
+        F-008 authority boundary: ONLY ORIGIN_AGENT is selectable here.
+        Trusted host code must use runtime_execute() — an agent-facing
+        caller can never manufacture ORIGIN_RUNTIME through this API.
         """
+        if origin != ORIGIN_AGENT:
+            raise ValueError(
+                "origin={!r} is not selectable through execute(); only "
+                "ORIGIN_AGENT is permitted. Trusted host code must use "
+                "runtime_execute().".format(origin)
+            )
+        return self._execute(
+            code=code, timeout=timeout, silent=silent, origin=ORIGIN_AGENT,
+            capabilities=capabilities, subject=subject, action=action,
+            effects=effects, approval_description=approval_description,
+            cancel_event=cancel_event,
+        )
+
+    def runtime_execute(
+        self,
+        code:                 str,
+        timeout:              float = 120.0,
+        silent:               bool  = False,
+        capabilities:         Optional[frozenset[str]] = None,
+        subject:              str   = "",
+        action:               Optional[Action] = None,
+        effects:              Optional[frozenset[str]] = None,
+        approval_description: str   = "",
+        cancel_event:         Optional[object] = None,
+    ) -> CellOutput:
+        """
+        Trusted host-code execution (F-008) — origin=ORIGIN_RUNTIME.
+
+        This is the ONLY way to obtain runtime authority: the transaction
+        lifecycle (audit records, event stream, effects, budget,
+        cancellation, finalization) still applies, but agent capability /
+        allowlist policy is skipped because the caller is trusted
+        infrastructure (setup, comms, materialization). This API is never
+        exposed to agent code.
+        """
+        return self._execute(
+            code=code, timeout=timeout, silent=silent, origin=ORIGIN_RUNTIME,
+            capabilities=capabilities, subject=subject, action=action,
+            effects=effects, approval_description=approval_description,
+            cancel_event=cancel_event,
+        )
+
+    def _execute(
+        self,
+        code:                 str,
+        timeout:              float,
+        silent:               bool,
+        origin:               str,
+        capabilities:         Optional[frozenset[str]],
+        subject:              str,
+        action:               Optional[Action],
+        effects:              Optional[frozenset[str]],
+        approval_description: str,
+        cancel_event:         Optional[object],
+    ) -> CellOutput:
         tx = self._prepare_transaction(
             code=code, origin=origin, capabilities=capabilities, subject=subject,
             action=action, effects=effects, approval_description=approval_description,
@@ -577,7 +648,60 @@ class ExecutionEngine:
         Guarantees complete lifecycle parity with execute(): capability check,
         approval gate, allowlist inspection, effect declaration/observation,
         and guaranteed finally lifecycle completion.
+
+        F-008 authority boundary: ONLY ORIGIN_AGENT is selectable; trusted
+        host code must use runtime_stream_execute().
         """
+        if origin != ORIGIN_AGENT:
+            raise ValueError(
+                "origin={!r} is not selectable through stream_execute(); only "
+                "ORIGIN_AGENT is permitted. Trusted host code must use "
+                "runtime_stream_execute().".format(origin)
+            )
+        yield from self._stream_execute(
+            code=code, timeout=timeout, origin=ORIGIN_AGENT,
+            capabilities=capabilities, subject=subject, action=action,
+            effects=effects, approval_description=approval_description,
+            cancel_event=cancel_event,
+        )
+
+    def runtime_stream_execute(
+        self,
+        code:                 str,
+        timeout:              float = 300.0,
+        capabilities:         Optional[frozenset[str]] = None,
+        subject:              str   = "",
+        action:               Optional[Action] = None,
+        effects:              Optional[frozenset[str]] = None,
+        approval_description: str   = "",
+        cancel_event:         Optional[object] = None,
+    ):
+        """
+        Trusted host-code streaming (F-008) — origin=ORIGIN_RUNTIME.
+
+        Streaming counterpart of runtime_execute(): full transaction
+        lifecycle, agent policy skipped because the caller is trusted
+        infrastructure. Never exposed to agent code.
+        """
+        yield from self._stream_execute(
+            code=code, timeout=timeout, origin=ORIGIN_RUNTIME,
+            capabilities=capabilities, subject=subject, action=action,
+            effects=effects, approval_description=approval_description,
+            cancel_event=cancel_event,
+        )
+
+    def _stream_execute(
+        self,
+        code:                 str,
+        timeout:              float,
+        origin:               str,
+        capabilities:         Optional[frozenset[str]],
+        subject:              str,
+        action:               Optional[Action],
+        effects:              Optional[frozenset[str]],
+        approval_description: str,
+        cancel_event:         Optional[object],
+    ):
         tx = self._prepare_transaction(
             code=code, origin=origin, capabilities=capabilities, subject=subject,
             action=action, effects=effects, approval_description=approval_description,
@@ -654,6 +778,7 @@ class ExecutionEngine:
         event_type:   str,
         event_payload: dict,
         action_sm:    Optional[ActionStateMachine] = None,
+        subject:      str = "",
     ) -> CellOutput:
         if action_sm is not None:
             action_sm.transition(ActionStatus.REJECTED, reason=rule)
@@ -674,9 +799,15 @@ class ExecutionEngine:
                        if action_sm is not None else None
                    ),
                    **event_payload)
+        # Observability (P2.13): every security rejection identifies the
+        # execution, subject, origin, capability, and decision reason.
+        # Secrets are never included — code_preview is redacted upstream.
         log.warning(
             "Execution blocked by policy",
             execution_id = execution_id,
+            origin       = origin,
+            subject      = subject,
+            capabilities = ",".join(sorted(caps)) if caps else "",
             rule         = rule,
             code_preview = code_preview,
         )

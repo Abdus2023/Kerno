@@ -51,13 +51,17 @@ def create_app(
     skills_path:       Optional[str] = None,
     memory_path:       str           = ".kerno/memory.json",
     pool_size:         int           = 3,
-    cors_origins:      list[str]     = ["*"],
+    cors_origins:      Optional[list[str]] = None,
     capability_broker: Optional[object] = None,
     budget:            Optional[object] = None,
     default_security:  str           = "data_analysis",
 ) -> "FastAPI":
     """
     Create and configure the FastAPI application with universal gateway governance (K-011).
+
+    CORS (F-010): cors_origins defaults to the secure same-origin policy;
+    pass an explicit allowlist (or set KERNO_CORS_ORIGINS) for
+    cross-origin deployments — the wildcard "*" is never implicit.
     """
     if not HAS_FASTAPI:
         raise ImportError(
@@ -67,9 +71,8 @@ def create_app(
 
     from kerno.kernel.pool    import KernelPool
     from kerno.memory.simple  import SimpleMemoryStore
-    from kerno.server.security import make_server_engine
+    from kerno.server.security import resolve_cors_origins, DEFAULT_CORS_METHODS, DEFAULT_CORS_HEADERS
     from kerno.cancel         import CancellationToken
-    from kerno.execution.budget import ExecutionBudget
 
     app = FastAPI(
         title       = "kerno",
@@ -77,14 +80,16 @@ def create_app(
         version     = "0.2.1-dev",
     )
 
-    # Wildcard origins must not allow credentials in production
-    allow_creds = cors_origins != ["*"]
+    # F-010: explicit-origin CORS policy. Wildcard origins never carry
+    # credentials.
+    origins = resolve_cors_origins(cors_origins)
+    allow_creds = bool(origins) and "*" not in origins
     app.add_middleware(
         CORSMiddleware,
-        allow_origins     = cors_origins,
+        allow_origins     = origins,
         allow_credentials = allow_creds,
-        allow_methods     = ["*"],
-        allow_headers     = ["*"],
+        allow_methods     = DEFAULT_CORS_METHODS,
+        allow_headers     = DEFAULT_CORS_HEADERS,
     )
 
     # Shared resources
@@ -95,23 +100,21 @@ def create_app(
 
     pool.start()
 
-    def _build_gateway_engine(kernel, profile: str = None, budget_cells: int = None):
-        from kerno.server.security import resolve_effective_profile
+    def _build_gateway_engine(kernel, profile: str = None, budget_cells: int = None,
+                              transport: str = "generic"):
+        # K-011/K-012: canonical gateway — a single authoritative builder
+        # for every public transport (F-007 consolidation).
+        from kerno.server.security import build_gateway_engine as _build_gateway
 
-        # K-012: client cannot downgrade below server policy
-        prof = resolve_effective_profile(profile, server_default=default_security, allow_downgrade=False)
-
-        req_budget = None
-        if budget_cells:
-            req_budget = ExecutionBudget(max_executions=int(budget_cells))
-
-        return make_server_engine(
+        return _build_gateway(
             kernel,
-            profile           = prof,
+            profile           = profile,
             capability_broker = capability_broker,
-            budget            = budget or req_budget,
+            budget            = budget,
             server_default    = default_security,
             allow_downgrade   = False,
+            budget_cells      = budget_cells,
+            transport         = transport,
         )
 
     # ── Routes ────────────────────────────────────────────────────────────────
@@ -214,7 +217,7 @@ def create_app(
 
                 bootstrap(kernel)
                 # K-011 / K-013: stream transport wraps kernel in server gateway engine
-                engine   = _build_gateway_engine(kernel, request.security, request.budget_cells)
+                engine   = _build_gateway_engine(kernel, request.security, request.budget_cells, transport="sse")
                 pipeline = make_reactive(
                     kernel    = engine,
                     llm       = llm,
@@ -280,7 +283,7 @@ def create_app(
 
                 bootstrap(kernel)
                 # K-011: WebSocket transport wraps kernel in server gateway engine
-                engine   = _build_gateway_engine(kernel, default_security, max_cells)
+                engine   = _build_gateway_engine(kernel, default_security, max_cells, transport="ws")
                 pipeline = make_reactive(
                     kernel    = engine,
                     llm       = llm,
@@ -382,20 +385,18 @@ def _execute_task(
 
     bootstrap(kernel)
 
-    # K-001 / K-012: client cannot downgrade server policy
-    from kerno.server.security import resolve_effective_profile
-    prof = resolve_effective_profile(getattr(request, "security", None), server_default=default_security, allow_downgrade=False)
-
-    req_budget = None
-    req_cells = getattr(request, "budget_cells", None)
-    if req_cells:
-        from kerno.execution.budget import ExecutionBudget
-        req_budget = ExecutionBudget(max_executions=int(req_cells))
-    engine = make_server_engine(
+    # K-001 / K-012: client cannot downgrade server policy.
+    # Canonical gateway: one authoritative builder for every transport.
+    from kerno.server.security import build_gateway_engine
+    engine = build_gateway_engine(
         kernel,
-        profile            = prof,
-        capability_broker  = capability_broker,
-        budget             = budget or req_budget,
+        profile           = getattr(request, "security", None),
+        capability_broker = capability_broker,
+        budget            = budget,
+        server_default    = default_security,
+        allow_downgrade   = False,
+        budget_cells      = getattr(request, "budget_cells", None),
+        transport         = "http",
     )
 
     factory = {

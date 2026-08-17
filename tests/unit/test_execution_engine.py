@@ -17,7 +17,7 @@ from kerno.interfaces import Executor
 from kerno.security.allowlist import AllowList, AllowListViolation
 from kerno.security.capabilities import (
     Capability, CapabilityBroker, CapabilityViolation,
-    CAP_KERNEL_EXECUTE, CAP_FILESYSTEM_READ,
+    CAP_KERNEL_EXECUTE, CAP_FILESYSTEM_READ, CAP_HUMAN_APPROVAL,
 )
 from kerno.types import CellOutput, Message, SessionStatus
 
@@ -103,9 +103,9 @@ class TestExecutionEngine:
         kernel = FakeKernel()
         engine = ExecutionEngine(kernel, allowlist=AllowList.read_only())
 
-        output = engine.execute(
-            VIOLATING_CODE, origin=ORIGIN_RUNTIME
-        )
+        # F-008: runtime authority is only reachable via runtime_execute(),
+        # never through the public execute() API.
+        output = engine.runtime_execute(VIOLATING_CODE)
 
         assert not output.has_error
         assert len(kernel.calls) == 1
@@ -235,7 +235,7 @@ class TestCapabilityAuthorization:
             default_capabilities=frozenset({CAP_KERNEL_EXECUTE}),
         )
 
-        output = engine.execute(BENIGN_CODE, origin=ORIGIN_RUNTIME)
+        output = engine.runtime_execute(BENIGN_CODE)
 
         assert not output.has_error
         assert len(kernel.calls) == 1
@@ -764,3 +764,67 @@ class TestAdversarialCapabilityAcquisition:
             assert e_req.parent_event_id is None
             assert e_start.parent_event_id == e_req.event_id
             assert e_comp.parent_event_id == e_start.event_id
+
+
+class TestOriginAuthorityBoundary:
+    """F-008: runtime authority cannot be manufactured through public APIs."""
+
+    VIOLATING = "import subprocess\nsubprocess.run(['echo', 'hi'])"
+
+    def test_execute_rejects_runtime_origin(self):
+        engine = ExecutionEngine(FakeKernel())
+        with pytest.raises(ValueError):
+            engine.execute("x = 1", origin=ORIGIN_RUNTIME)
+
+    def test_execute_rejects_unknown_origin(self):
+        engine = ExecutionEngine(FakeKernel())
+        with pytest.raises(ValueError):
+            engine.execute("x = 1", origin="forged")
+
+    def test_execute_silent_rejects_runtime_origin(self):
+        engine = ExecutionEngine(FakeKernel())
+        with pytest.raises(ValueError):
+            engine.execute_silent("x = 1", origin=ORIGIN_RUNTIME)
+
+    def test_stream_execute_rejects_runtime_origin(self):
+        engine = ExecutionEngine(FakeKernel())
+        with pytest.raises(ValueError):
+            list(engine.stream_execute("x = 1", origin=ORIGIN_RUNTIME))
+
+    def test_runtime_execute_is_audited_as_runtime(self):
+        kernel = FakeKernel()
+        engine = ExecutionEngine(kernel)
+        out = engine.runtime_execute("x = 1")
+        assert not out.has_error
+        assert len(engine.records) == 1
+        assert engine.records[0].origin == ORIGIN_RUNTIME
+        assert engine.records[0].allowed
+        event_types = [e.event_type for e in engine.events]
+        assert event_types[-1] == "EXECUTION_COMPLETED"
+
+    def test_runtime_stream_execute_is_audited_as_runtime(self):
+        engine = ExecutionEngine(FakeKernel())
+        chunks = list(engine.runtime_stream_execute("x = 1"))
+        assert chunks
+        assert len(engine.records) == 1
+        assert engine.records[0].origin == ORIGIN_RUNTIME
+
+    def test_agent_cannot_obtain_runtime_authority_even_with_capabilities(self):
+        # Even with every capability granted, the public API must not
+        # escalate to runtime authority (F-008).
+        broker = CapabilityBroker()
+        broker.grant_many({CAP_KERNEL_EXECUTE}, subject="agent-1")
+        engine = ExecutionEngine(FakeKernel(), broker=broker)
+        with pytest.raises(ValueError):
+            engine.execute("x = 1", origin=ORIGIN_RUNTIME, subject="agent-1")
+
+    def test_runtime_execute_skips_policy_but_keeps_lifecycle(self):
+        # Sanity: the trusted API is the ONLY runtime path and still
+        # produces the full audit lifecycle.
+        kernel = FakeKernel()
+        engine = ExecutionEngine(kernel, allowlist=AllowList.read_only())
+        out = engine.runtime_execute(self.VIOLATING)
+        assert not out.has_error          # trusted host code
+        assert len(kernel.calls) == 1
+        assert len(engine.records) == 1
+        assert engine.records[0].allowed
