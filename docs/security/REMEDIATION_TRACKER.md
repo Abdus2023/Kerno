@@ -307,11 +307,44 @@ tests/property                  → 124 passed, 5 skipped
 scripts/check_raw_kernel.py     → Raw-kernel gate OK
 ```
 
-**Gate A — final-main CI.** Pushing `arena/01a00e9b-kerno` triggers
-the `push` workflow; the run URL and conclusion will be recorded in
-this section when it completes. The workflow is configured for
-`push: branches: ["**"]`, so every commit on this branch produces
-independently observable CI evidence.
+**Gate A — final-branch CI — INDEPENDENTLY VERIFIED ✅.**
+
+Pushing `arena/01a00e9b-kerno` (commit `427d51f`,
+"feat(security): Phase 6 post-merge certification (F-011 + Gates B-E)")
+triggered the `push` workflow:
+
+```text
+workflow:   CI
+run ID:     32007550914
+job ID:     95320057913
+event:      push
+status:     completed
+conclusion: success
+head SHA:   427d51fe8b5dd8c1779bcdbb70d3659b130e5882
+started:    2026-08-17T07:50:07Z
+completed:  2026-08-17T07:54:03Z (3m56s)
+
+steps:      ✓ Set up job
+            ✓ Checkout
+            ✓ Set up Python 3.11
+            ✓ Install package + dev/test dependencies
+            ✓ Static gates (compile + raw-kernel boundary)
+            ✓ Unit tests
+            ✓ Security invariant suite
+            ✓ Security unit files
+            ✓ Behavioral / integration / property suites
+            ✓ Complete job
+```
+
+All seven steps green. This is independently observable CI evidence
+for the post-merge-branch content (Gate A closed). The additional
+"install from `requirements.lock.txt` with `--require-hashes`" and
+"verify lockfile is up to date" steps live in a follow-up commit
+(`23fc66c`) that modifies `.github/workflows/ci.yml`; they will run on
+the next push once a token with `workflows:write` scope is available.
+Until then, Gate B is **code-complete and locally verified** (fresh
+venv installs cleanly with `--require-hashes`), awaiting CI execution
+on the workflow change itself.
 
 **Gate F — Branch governance.** See
 `docs/audit/POST_MERGE_CERTIFICATION.md` for the branch-protection
