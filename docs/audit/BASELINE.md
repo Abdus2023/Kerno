@@ -152,8 +152,30 @@ tests/unit      → 1042 passed, 1 skipped
 tests/security  → 18 passed
 ```
 
-**Remaining:** F-009 CI execution evidence (`CI VERIFIED`), `main` branch
-protection (requires a green CI check), dependency lock/constraints.
+### Phase 5 — CERTIFY (2026-08-17)
+
+- **F-009 CI VERIFIED** — the repo owner added the workflow to `main`
+  (commit `0db50eb`). PR #5 (`arena/01a00e08-kerno` → `main`) triggered
+  the CI `pull_request` run:
+
+  ```text
+  run ID:    32003440545     job: test — SUCCESS (all 7 steps)
+  head SHA:  0d70f35         started 06:53:12Z → finished 06:57:00Z
+  checks:    https://github.com/Abdus2023/Kerno/pull/5 (pass)
+  ```
+
+- **Final regression re-audit (plan Step 8)** — clean:
+  - `urlretrieve(` → 0 real usages (only the gate's own detector text)
+  - `make_server_engine(` → only `kerno/server/security.py`; all five
+    transports construct via `build_gateway_engine()`
+  - `ORIGIN_RUNTIME` → definition + trusted executor wrappers
+    (`files.py`, `rag.py`) + re-exports; no server entry point touches it
+  - `KernelRuntime(` → only the 9 approved bootstrap files (gate passes)
+  - raw `kernel.execute(` in `kerno/server/` → 0
+
+**Remaining:** merge PR #5 (release gate), enable `main` branch
+protection once the CI check is green on `main`, dependency
+lock/constraints (still open).
 
 ---
 
