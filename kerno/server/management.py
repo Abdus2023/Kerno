@@ -37,7 +37,7 @@ try:
 except ImportError:                                          # pragma: no cover
     HAS_FASTAPI = False
 
-from kerno.server.auth import _key_store, _rate_limiter
+from kerno.server import auth as _auth_mod
 
 
 # Principal recorded on sessions/resources when no authentication is in
@@ -113,11 +113,11 @@ if HAS_FASTAPI:
                 status_code=401,
                 detail="API key required. Pass as: Authorization: Bearer <key>",
             )
-        info = _key_store.validate(credentials.credentials)
+        info = _auth_mod._key_store.validate(credentials.credentials)
         if not info:
             raise HTTPException(status_code=401, detail="Invalid API key")
 
-        allowed, remaining = _rate_limiter.check(
+        allowed, remaining = _auth_mod._rate_limiter.check(
             info["user_id"], info["rate_limit"],
         )
         if not allowed:

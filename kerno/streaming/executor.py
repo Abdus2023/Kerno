@@ -112,9 +112,21 @@ class StreamingExecutor:
         loop = asyncio.get_event_loop()
 
         def sync_emit(event: StreamEvent) -> None:
-            asyncio.run_coroutine_threadsafe(
-                event_queue.put(event), loop
-            )
+            # Use call_soon_threadsafe + put_nowait rather than
+            # run_coroutine_threadsafe(queue.put(event), loop). The
+            # latter creates a coroutine that is never awaited if the
+            # event loop closes while the worker thread is still
+            # emitting (e.g. client disconnect) — producing
+            # "RuntimeWarning: coroutine 'Queue.put' was never awaited"
+            # and "Event loop is closed" on the worker thread.
+            # put_nowait is synchronous and unbounded in this usage, so
+            # there is no backpressure concern for the in-memory queue.
+            if loop.is_closed():
+                return
+            try:
+                loop.call_soon_threadsafe(event_queue.put_nowait, event)
+            except RuntimeError:
+                return
 
         self.on_any(sync_emit)
 
@@ -139,9 +151,11 @@ class StreamingExecutor:
                 cells      = len(final.history),
                 duration_s = time.time() - started,
             ))
-            asyncio.run_coroutine_threadsafe(
-                event_queue.put(None), loop   # Sentinel: done
-            )
+            if not loop.is_closed():
+                try:
+                    loop.call_soon_threadsafe(event_queue.put_nowait, None)
+                except RuntimeError:
+                    pass
 
         thread = threading.Thread(target=_run, daemon=True)
         thread.start()

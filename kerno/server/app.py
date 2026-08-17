@@ -320,16 +320,44 @@ def create_app(
         honored. The previous behaviour hard-coded the server default,
         which was safer than allowing downgrade but inconsistent with
         the other transports.
+
+        Authentication (F-011): browsers cannot set Authorization
+        headers on WebSocket handshakes, so when management auth is
+        required the client may pass ``?token=<api-key>`` as a query
+        parameter. The token is validated against the same key store
+        used by HTTP. If no valid token is supplied and auth is
+        required, the connection is closed with code 1008 (policy
+        violation) before any task is accepted.
         """
+        # Gate C: authenticate before accepting the task so anonymous
+        # callers cannot reach the session machinery.
+        from kerno.server import auth as _auth_mod
+        if auth_required:
+            token = ws.query_params.get("token")
+            if not token:
+                await ws.close(code=1008, reason="authentication required")
+                return
+            info = _auth_mod._key_store.validate(token)
+            if not info:
+                await ws.close(code=1008, reason="invalid API key")
+                return
+            allowed, _remaining = _auth_mod._rate_limiter.check(
+                info["user_id"], info.get("rate_limit", 100),
+            )
+            if not allowed:
+                await ws.close(code=1008, reason="rate limit exceeded")
+                return
+            principal = info
+        else:
+            principal = {"user_id": ANONYMOUS_PRINCIPAL}
+
         await ws.accept()
         task_id      = "ws-{}".format(session_id[:8])
         cancel_token = CancellationToken()
         active_tokens[session_id] = cancel_token
-        # WebSocket has no standard auth header; ownership defaults to
-        # the anonymous principal. Deployments requiring authenticated
-        # WebSockets should front this endpoint with a token-checking
-        # proxy or extend the connect payload with a bearer token.
-        session_owners[session_id] = ANONYMOUS_PRINCIPAL
+        # F-011: record the authenticated principal (or anonymous) so
+        # management-plane lookups/cancels remain ownership-consistent.
+        session_owners[session_id] = _principal_id(principal)
 
         try:
             data      = await ws.receive_json()

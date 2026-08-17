@@ -284,6 +284,63 @@ class TestHTTPTransportParity:
         assert not any("requests" in c for c in _last_kernel().calls)
 
 
+class TestWebSocketAuth:
+    """F-011: WebSocket must require authentication when the app does."""
+
+    def test_ws_rejects_anonymous_when_auth_required(self, fake_infra):
+        from kerno.server.app import create_app
+        app = TestClient(create_app(
+            _llm("print(1)"), require_auth=True,
+        ))
+        # The server should close the handshake with policy-violation
+        # (1008) before accepting any task. TestClient surfaces this as
+        # a WebSocketDisconnect on connect.
+        with pytest.raises(Exception):
+            with app.websocket_connect("/ws/sess-1") as ws:
+                ws.send_json({"task": "x"})
+                ws.receive_json()
+
+    def test_ws_accepts_valid_token_via_query_param(self, fake_infra, monkeypatch):
+        monkeypatch.setenv("KERNO_API_KEYS", "ws-key:user-ws:WS")
+        import kerno.server.auth as auth_mod
+        auth_mod._key_store = auth_mod.APIKeyStore().from_env()
+
+        from kerno.server.app import create_app
+        app = TestClient(create_app(
+            _llm("print(1)"), require_auth=True,
+        ))
+        with app.websocket_connect("/ws/sess-2?token=ws-key") as ws:
+            ws.send_json({"task": "hello", "max_cells": 3})
+            msgs = []
+            for _ in range(20):
+                try:
+                    m = ws.receive_json()
+                    msgs.append(m)
+                except Exception:
+                    break
+                if (m.get("kind") or "").upper() in (
+                    "SESSION_COMPLETE", "SESSION_ERROR",
+                ):
+                    break
+        # The session was accepted and started; no 1008 close.
+        assert any(m.get("kind") == "session_start"
+                   or m.get("kind") == "SESSION_START" for m in msgs)
+
+    def test_ws_rejects_invalid_token(self, fake_infra, monkeypatch):
+        monkeypatch.setenv("KERNO_API_KEYS", "good-key:user-ws:WS")
+        import kerno.server.auth as auth_mod
+        auth_mod._key_store = auth_mod.APIKeyStore().from_env()
+
+        from kerno.server.app import create_app
+        app = TestClient(create_app(
+            _llm("print(1)"), require_auth=True,
+        ))
+        with pytest.raises(Exception):
+            with app.websocket_connect("/ws/sess-3?token=bad-key") as ws:
+                ws.send_json({"task": "x"})
+                ws.receive_json()
+
+
 # ── Gateway decision parity (unit-level) ──────────────────────────────────────
 
 class TestGatewayDecisionParity:
