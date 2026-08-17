@@ -20,7 +20,8 @@ import uuid
 from typing import Optional
 
 try:
-    from fastapi            import FastAPI
+    from contextlib         import asynccontextmanager
+    from fastapi            import Depends, FastAPI
     from fastapi.responses  import StreamingResponse, JSONResponse
     from fastapi.middleware.cors import CORSMiddleware
     from pydantic           import BaseModel, Field
@@ -87,9 +88,17 @@ def create_openai_app(
     from kerno.skills.bootstrap   import bootstrap
     from kerno.streaming.protocol import EventKind
 
-    app  = FastAPI(title="Kerno OpenAI-Compatible API")
     pool = KernelPool(size=pool_size, skills_path=skills_path)
-    pool.start()
+
+    @asynccontextmanager
+    async def lifespan(app: "FastAPI"):
+        pool.start()
+        try:
+            yield
+        finally:
+            pool.shutdown()
+
+    app  = FastAPI(title="Kerno OpenAI-Compatible API", lifespan=lifespan)
 
     # F-010: explicit-origin CORS policy — the wildcard "*" is never
     # implicit. Pass cors_origins (or set KERNO_CORS_ORIGINS) for
@@ -105,13 +114,21 @@ def create_openai_app(
     )
 
     # ── Health check ─────────────────────────────────────────────────────────
+    # F-011: /health/live stays public (minimal disclosure, used by load
+    # balancers). /health exposes pool statistics and is therefore
+    # management-plane — gated by management_principal, which fails
+    # closed in production / when KERNO_ENABLE_AUTH is set.
+    from kerno.server.management import management_principal as _mgmt
+    # The OpenAI-compatible app does not take an explicit enable_auth
+    # flag; it follows the process/environment policy. Use the default
+    # (env-driven) dependency directly.
 
     @app.get("/health/live")
     async def health_live():
         return {"status": "ok"}
 
     @app.get("/health")
-    async def health():
+    async def health(principal: dict = Depends(_mgmt)):
         return {
             "status":      "ok",
             "pool_stats":  pool.stats,     # KernelPool.stats is a property
@@ -119,9 +136,13 @@ def create_openai_app(
         }
 
     # ── Model listing (required by Open WebUI) ────────────────────────────────
+    # The catalog itself is not sensitive (model id/name), but in an
+    # authenticated deployment it should not be reachable anonymously as
+    # an existence oracle. It is therefore gated by the same management
+    # principal.
 
     @app.get("/v1/models")
-    async def list_models():
+    async def list_models(principal: dict = Depends(_mgmt)):
         """
         Open WebUI calls this to populate the model dropdown.
         Return at least one model.
@@ -336,10 +357,6 @@ def create_openai_app(
 
         finally:
             pool.release(task_id, reason="complete")
-
-    @app.on_event("shutdown")
-    async def shutdown():
-        pool.shutdown()
 
     return app
 

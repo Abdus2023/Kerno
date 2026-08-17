@@ -13,8 +13,13 @@ ci:
 	$(PY) scripts/check_raw_kernel.py
 	$(PYTEST) tests/unit -q
 	$(PYTEST) tests/security -q
-	$(PYTEST) tests/unit/test_security.py tests/unit/test_execution_engine.py tests/unit/test_capability_broker.py tests/unit/test_secrets.py tests/unit/test_isolation.py tests/unit/test_invariants.py -q
+	$(PYTEST) tests/unit/test_security.py tests/unit/test_execution_engine.py tests/unit/test_capability_broker.py tests/unit/test_secrets.py tests/unit/test_isolation.py tests/unit/test_invariants.py tests/unit/test_management_plane.py tests/unit/test_transport_parity.py tests/unit/test_static_gate.py -q
 	$(PYTEST) tests/behavioral tests/integration tests/property -q
+
+# Regenerate the reproducible dependency lockfile (Gate B).
+# Requires pip-tools: pip install pip-tools
+lock:
+	pip-compile --resolver=backtracking --extra=all --extra=dev --generate-hashes -o requirements.lock.txt pyproject.toml
 
 test:
 	pytest tests/ -x -q --tb=short
