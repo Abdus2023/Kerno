@@ -30,7 +30,7 @@ baseline `36943e1c854d576f1d3bbff96481ae57e7fb94b5`).
 | F-006 | Secure-app downgrade | `server_default` wiring | endpoint tests in `test_server_endpoint_security.py` | Pending | 🟢 IMPLEMENTED + TESTED LOCALLY |
 | F-007 | Missing endpoint tests | integration suite | sync + streaming endpoint tests for OpenAI + secure app (main `/run` `/stream` `/ws` already covered by `test_server_security.py`) | Pending | 🟢 IMPLEMENTED (OpenAI + secure endpoints) |
 | F-008 | Runtime-origin authority | `runtime_execute()`/`runtime_stream_execute()` trusted APIs; public `execute()`/`stream_execute()`/`execute_silent()` reject `ORIGIN_RUNTIME` | `TestOriginAuthorityBoundary` + `tests/unit/test_capability_escalation.py` | Pending | 🟢 IMPLEMENTED + TESTED LOCALLY |
-| F-009 | CI evidence | GitHub Actions workflow — **now on `main`** (repo owner commit `0db50eb`; PR #5 `pull_request` trigger) | ✅ **CI VERIFIED** — run `32003440545`, job `test`: success, on PR #5 merge ref (head `0d70f35`), 2026-08-17 06:53:12Z → 06:57:00Z, all 7 steps green | ✅ CI VERIFIED | 🟢 CI VERIFIED (2026-08-17) |
+| F-009 | CI evidence | GitHub Actions workflow on `main` (owner commit `0db50eb`); **merged** — PR #5 → `fc20522` | ✅ **CI VERIFIED** — PR runs `32003440545` + `32003862694` (success) AND main push run `32004184328` (success) | ✅ CI VERIFIED | 🟢 CI VERIFIED (3 green runs, 2026-08-17) |
 | F-010 | CORS | explicit-origin allowlist (`resolve_cors_origins` + `KERNO_CORS_ORIGINS`), no wildcard default | `TestCORSOriginPolicy` in `test_server_endpoint_security.py` | Pending | 🟢 IMPLEMENTED + TESTED LOCALLY |
 | — | Observability (P2.13) | denial logs carry execution_id/origin/subject/capabilities/rule; gateway logs transport+requested+effective+server_default; materialization logs file/source/hostname/decision (never secrets/contents) | suite logs verified | Pending | 🟢 IMPLEMENTED |
 | — | RAG bridge raw kernel (F-001 sibling) | `OpenWebUIRAGBridge` now requires `execute_load_code`; loads via engine | structural guard + static gate | Pending | 🟢 IMPLEMENTED + TESTED LOCALLY |
@@ -193,15 +193,28 @@ tests/property                   → 124 passed, 5 skipped
   `tests/security/` exist only on the remediation branch — expected until
   PR #5 merges.
 
-- **Phase 5 — CERTIFY (partial)** — CI executed on the exact branch
+- **Phase 5 — CERTIFY (complete)** — CI executed on the exact branch
   content (run `32003440545`); final regression re-audit clean:
   `urlretrieve(` → 0 real usages; `make_server_engine(` → only
   `security.py` (all transports use `build_gateway_engine`);
   `ORIGIN_RUNTIME` → definition + trusted executor wrappers only;
   `KernelRuntime(` → only the 9 approved bootstrap files; raw
-  `kernel.execute(` in `kerno/server/` → 0. Remaining: merge PR #5
-  (release gate) and `main` branch protection once the check is green on
-  `main`.
+  `kernel.execute(` in `kerno/server/` → 0.
+- **Release gate (2026-08-17) — DONE** — PR #5 merged into `main`
+  (merge commit `fc20522`, merged 07:04:01Z). The merge-triggered CI push
+  run on `main` (`32004184328`) **passed** — all 7 steps green on the
+  merged tree, so the gate chain (raw-kernel gate, unit, invariant,
+  security, behavioral/integration/property) is now verified on `main`
+  itself.
+- **`main` branch protection** — attempted via API (required status check
+  `test`, 1 approving review); the arena GitHub App lacks admin rights
+  (HTTP 403). The repo owner can enable it with one call or in
+  Settings → Branches: require the `CI` workflow's `test` check (and
+  optionally 1 review) on `main`. The check now exists and is green, so
+  protection can be enforced immediately.
+- **Remaining (low priority, documented):** dependency lock/constraints
+  (P3 item 18) — open-ended core ranges still allow graph drift between
+  installs months apart.
 
 ## Decision gate
 
