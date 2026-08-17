@@ -12,7 +12,7 @@ import uuid
 from typing import Optional
 
 try:
-    from fastapi              import FastAPI, WebSocket, WebSocketDisconnect
+    from fastapi              import Depends, FastAPI, WebSocket, WebSocketDisconnect
     from fastapi.responses    import StreamingResponse, JSONResponse
     from fastapi.middleware.cors import CORSMiddleware
     from pydantic             import BaseModel, Field
@@ -55,6 +55,7 @@ def create_app(
     capability_broker: Optional[object] = None,
     budget:            Optional[object] = None,
     default_security:  str           = "data_analysis",
+    require_auth:      Optional[bool] = None,
 ) -> "FastAPI":
     """
     Create and configure the FastAPI application with universal gateway governance (K-011).
@@ -62,6 +63,14 @@ def create_app(
     CORS (F-010): cors_origins defaults to the secure same-origin policy;
     pass an explicit allowlist (or set KERNO_CORS_ORIGINS) for
     cross-origin deployments — the wildcard "*" is never implicit.
+
+    Management-plane authorization (F-011): when ``require_auth`` is True
+    (or ``KERNO_ENABLE_AUTH`` is set, or ``KERNO_RUNTIME_MODE=production``),
+    the operational endpoints (``/health``, ``/metrics``, ``/sessions``,
+    ``/sessions/{id}``, cancellation) require a valid API key, and
+    session-scoped operations enforce ownership. ``/health/live`` remains
+    public (minimal disclosure) so load balancers can liveness-probe
+    without credentials.
     """
     if not HAS_FASTAPI:
         raise ImportError(
@@ -72,7 +81,24 @@ def create_app(
     from kerno.kernel.pool    import KernelPool
     from kerno.memory.simple  import SimpleMemoryStore
     from kerno.server.security import resolve_cors_origins, DEFAULT_CORS_METHODS, DEFAULT_CORS_HEADERS
+    from kerno.server.management import (
+        ANONYMOUS_PRINCIPAL,
+        assert_session_owner,
+        management_auth_required,
+        make_principal_dependency,
+    )
     from kerno.cancel         import CancellationToken
+
+    # Allow the caller to force management-plane auth on or off; the
+    # environment/process policy is the default. When explicitly
+    # disabled, ownership still uses the anonymous principal.
+    auth_required = (
+        require_auth if require_auth is not None else management_auth_required()
+    )
+
+    # Per-app dependency closure so two apps in the same process (e.g.
+    # in tests) can have different auth policies.
+    _mgmt_principal = make_principal_dependency(auth_required)
 
     app = FastAPI(
         title       = "kerno",
@@ -96,9 +122,18 @@ def create_app(
     pool   = KernelPool(size=pool_size, skills_path=skills_path)
     memory = SimpleMemoryStore(persist_path=memory_path)
     sessions: dict[str, SessionResult] = {}
+    # F-011: per-session owner map so /sessions/{id} and cancellation
+    # cannot cross principals. The data-plane endpoints also record
+    # ownership here so management-plane lookups stay consistent.
+    session_owners: dict[str, str] = {}
     active_tokens: dict[str, CancellationToken] = {}
 
     pool.start()
+
+    def _principal_id(principal: Optional[dict]) -> str:
+        if not principal:
+            return ANONYMOUS_PRINCIPAL
+        return principal.get("user_id", ANONYMOUS_PRINCIPAL) or ANONYMOUS_PRINCIPAL
 
     def _build_gateway_engine(kernel, profile: str = None, budget_cells: int = None,
                               transport: str = "generic"):
@@ -121,12 +156,12 @@ def create_app(
 
     @app.get("/health/live")
     async def health_live():
-        """Public liveness probe (minimal disclosure)."""
+        """Public liveness probe (minimal disclosure, F-011)."""
         return {"status": "ok"}
 
     @app.get("/health")
-    async def health():
-        """Operational readiness probe."""
+    async def health(principal: dict = Depends(_mgmt_principal)):
+        """Operational readiness probe — management-plane (F-011)."""
         return {
             "status":      "ok",
             "pool_stats":  pool.stats,
@@ -135,13 +170,23 @@ def create_app(
         }
 
     @app.get("/metrics")
-    async def metrics():
+    async def metrics(principal: dict = Depends(_mgmt_principal)):
         from kerno.telemetry import get_metrics
         return get_metrics().snapshot()
 
     @app.post("/sessions/{session_id}/cancel")
-    async def cancel_session(session_id: str):
-        """Cancel an actively executing session (audit #83)."""
+    async def cancel_session(
+        session_id: str,
+        principal: dict = Depends(_mgmt_principal),
+    ):
+        """Cancel an actively executing session (audit #83). Ownership-gated (F-011)."""
+        owner = session_owners.get(session_id)
+        if owner is None and session_id not in active_tokens:
+            return JSONResponse(
+                status_code = 404,
+                content     = {"error": f"Active session {session_id} not found or already completed"}
+            )
+        assert_session_owner(owner, principal, session_id=session_id)
         token = active_tokens.get(session_id)
         if not token:
             return JSONResponse(
@@ -152,7 +197,10 @@ def create_app(
         return {"status": "cancelling", "session_id": session_id}
 
     @app.post("/run", response_model=RunResponse)
-    async def run_task(request: RunRequest):
+    async def run_task(
+        request: RunRequest,
+        principal: dict = Depends(_mgmt_principal),
+    ):
         """
         Execute a task synchronously through the ExecutionGateway (K-011).
         """
@@ -160,6 +208,7 @@ def create_app(
         task_id      = "http-{}".format(session_id[:8])
         cancel_token = CancellationToken()
         active_tokens[session_id] = cancel_token
+        session_owners[session_id] = _principal_id(principal)
 
         kernel = pool.acquire(task_id)
         try:
@@ -199,7 +248,10 @@ def create_app(
             pool.release(task_id, reason="complete")
 
     @app.post("/stream")
-    async def stream_task(request: RunRequest):
+    async def stream_task(
+        request: RunRequest,
+        principal: dict = Depends(_mgmt_principal),
+    ):
         """
         Execute a task and stream events through the ExecutionGateway (K-011).
         """
@@ -207,6 +259,7 @@ def create_app(
         task_id      = "sse-{}".format(session_id[:8])
         cancel_token = CancellationToken()
         active_tokens[session_id] = cancel_token
+        session_owners[session_id] = _principal_id(principal)
 
         async def event_generator():
             kernel = pool.acquire(task_id)
@@ -258,17 +311,37 @@ def create_app(
     async def websocket_stream(ws: WebSocket, session_id: str):
         """
         WebSocket endpoint with ExecutionGateway governance (K-011).
+
+        Transport parity (F-007 / Gate D): the WebSocket now accepts an
+        optional ``security`` field in its connect payload — exactly like
+        ``/run`` and ``/stream`` — and routes it through the canonical
+        gateway. A client cannot downgrade below the server default
+        (``allow_downgrade=False``); a request for a stronger profile is
+        honored. The previous behaviour hard-coded the server default,
+        which was safer than allowing downgrade but inconsistent with
+        the other transports.
         """
         await ws.accept()
         task_id      = "ws-{}".format(session_id[:8])
         cancel_token = CancellationToken()
         active_tokens[session_id] = cancel_token
+        # WebSocket has no standard auth header; ownership defaults to
+        # the anonymous principal. Deployments requiring authenticated
+        # WebSockets should front this endpoint with a token-checking
+        # proxy or extend the connect payload with a bearer token.
+        session_owners[session_id] = ANONYMOUS_PRINCIPAL
 
         try:
             data      = await ws.receive_json()
             task      = data.get("task", "")
             raw_cells = data.get("max_cells", 50)
             max_cells = min(max(1, int(raw_cells)), 100) # Server-enforced cell cap
+            # Gate D: client-requested profile (resolved through the
+            # same canonical builder used by /run, /stream, OpenAI sync,
+            # OpenAI streaming, and the secure app).
+            requested_profile = data.get("security")
+            raw_budget = data.get("budget_cells")
+            budget_cells = int(raw_budget) if raw_budget is not None else None
 
             if not task:
                 await ws.send_json({"error": "task is required"})
@@ -283,7 +356,9 @@ def create_app(
 
                 bootstrap(kernel)
                 # K-011: WebSocket transport wraps kernel in server gateway engine
-                engine   = _build_gateway_engine(kernel, default_security, max_cells, transport="ws")
+                engine   = _build_gateway_engine(
+                    kernel, requested_profile, budget_cells, transport="ws",
+                )
                 pipeline = make_reactive(
                     kernel    = engine,
                     llm       = llm,
@@ -309,6 +384,13 @@ def create_app(
 
         except WebSocketDisconnect:
             pass
+        except ValueError as e:
+            # Unknown security profile — return a clear error instead of
+            # a generic 500 surfaced via the except below.
+            try:
+                await ws.send_json({"error": str(e)})
+            except Exception:
+                pass
         except Exception as e:
             try:
                 await ws.send_json({"error": str(e)})
@@ -316,13 +398,21 @@ def create_app(
                 pass
 
     @app.get("/sessions")
-    async def list_sessions(limit: int = 20):
-        """List recent sessions."""
+    async def list_sessions(
+        limit: int = 20,
+        principal: dict = Depends(_mgmt_principal),
+    ):
+        """List recent sessions owned by the caller (F-011)."""
+        caller = _principal_id(principal)
+        owned = [
+            s for sid, s in sessions.items()
+            if session_owners.get(sid, ANONYMOUS_PRINCIPAL) == caller
+        ]
         recent = sorted(
-            sessions.values(),
+            owned,
             key     = lambda s: s.started_at,
             reverse = True,
-        )[:limit]
+        )[:max(1, min(limit, 100))]
 
         return [{
             "session_id":     s.session_id,
@@ -334,14 +424,20 @@ def create_app(
         } for s in recent]
 
     @app.get("/sessions/{session_id}")
-    async def get_session(session_id: str):
-        """Get details of a specific session."""
+    async def get_session(
+        session_id: str,
+        principal: dict = Depends(_mgmt_principal),
+    ):
+        """Get details of a specific session — ownership-gated (F-011)."""
         result = sessions.get(session_id)
         if not result:
             return JSONResponse(
                 status_code = 404,
                 content     = {"error": "Session {} not found".format(session_id)}
             )
+        assert_session_owner(
+            session_owners.get(session_id), principal, session_id=session_id,
+        )
         return {
             "session_id":     result.session_id,
             "task":           result.task,

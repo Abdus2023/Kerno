@@ -1,0 +1,12 @@
+# Security-sensitive paths require explicit review.
+# (Gate G — see docs/audit/BRANCH_PROTECTION.md.)
+
+/kerno/security/                @Abdus2023
+/kerno/server/                  @Abdus2023
+/kerno/execution/               @Abdus2023
+/kerno/cancel.py                @Abdus2023
+/scripts/check_raw_kernel.py    @Abdus2023
+/.github/workflows/             @Abdus2023
+/requirements.lock.txt          @Abdus2023
+/docs/security/                 @Abdus2023
+/docs/audit/                    @Abdus2023

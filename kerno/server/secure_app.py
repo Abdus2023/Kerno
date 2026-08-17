@@ -17,6 +17,8 @@ try:
 except ImportError:
     HAS_FASTAPI = False
 
+from kerno.server.management import make_principal_dependency
+
 
 try:
     from kerno.server.auth  import verify_api_key, RateLimiter
@@ -85,11 +87,24 @@ def create_secure_app(
         allow_headers     = DEFAULT_CORS_HEADERS,
     )
 
-    # Auth dependency
+    # Auth dependency — used by the data plane (chat completions) and by
+    # management-plane endpoints when the caller has enabled auth for
+    # this app. When auth is disabled (local development) the dependency
+    # returns the anonymous principal.
     auth_dep = verify_api_key if enable_auth else lambda: {"user_id": "anon", "max_cells": 50, "rate_limit": 1000}
 
+    # F-011: management-plane endpoints always require a principal. When
+    # auth is enabled on this app, the same API-key dependency governs
+    # them; when it is disabled, they resolve to the anonymous principal.
+    mgmt_dep = make_principal_dependency(enable_auth)
+
+    @app.get("/health/live")
+    async def health_live():
+        """Public liveness probe (minimal disclosure, F-011)."""
+        return {"status": "ok"}
+
     @app.get("/v1/models")
-    async def list_models():
+    async def list_models(principal: dict = Depends(mgmt_dep)):
         return {
             "object": "list",
             "data": [
@@ -214,7 +229,8 @@ def create_secure_app(
             pool.release(task_id, reason="complete")
 
     @app.get("/health")
-    async def health():
+    async def health(principal: dict = Depends(mgmt_dep)):
+        """Operational health — management-plane (F-011)."""
         return {"status": "ok", "pool": pool.stats, "sessions": len(usage_log)}
 
     @app.get("/usage")
