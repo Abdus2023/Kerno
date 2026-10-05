@@ -1,0 +1,14 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://kerno.dev/.agent/tools/gpjk-authorization.schema.json",
+  "title":"GPJK Authorization Decision Contract",
+  "type":"object","additionalProperties":false,
+  "required":["decision","policy"],
+  "properties":{
+    "decision":{"enum":["permit","deny","indeterminate"]},
+    "policy":{"type":"object","additionalProperties":false,"required":["id","version"],"properties":{"id":{"type":"string"},"version":{"type":"string"}}},
+    "actor":{"type":"string"},"action":{"type":"string"},"resource":{"type":"string"},
+    "obligations":{"type":"array","items":{"type":"string"}},"prohibitions":{"type":"array","items":{"type":"string"}},
+    "trace":{"type":"array","items":{"type":"object","additionalProperties":true}}
+  }
+}
