@@ -17,7 +17,8 @@
     "repo-audit-adapter",
     "repository-inventory",
     "evidence-bundle",
-    "github-acquisition"
+    "github-acquisition",
+    "execution-evidence"
   ],
   "tools": [
     "repository-snapshot",
@@ -25,7 +26,9 @@
     "verification-gate",
     "workflow",
     "claim",
-    "release-gate"
+    "release-gate",
+    "execution-evidence.schema.json",
+    "execution-claim.schema.json"
   ],
   "principles": [
     "NO EVIDENCE -> NO VERIFIED CLAIM",
