@@ -1,4 +1,4 @@
-import {record} from "./adapters/evidence-record.ts";
+import {record} from "./evidence-record.ts";
 
 export interface AuditFinding {
   id:string;
