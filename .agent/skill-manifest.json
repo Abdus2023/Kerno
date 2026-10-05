@@ -11,12 +11,16 @@
     "federation-design",
     "market-design",
     "continuation-controller",
-    "repo-engineering-plan"
+    "repo-engineering-plan",
+    "agent-workflow"
   ],
   "tools": [
     "repository-snapshot",
     "evidence-record",
-    "verification-gate"
+    "verification-gate",
+    "workflow",
+    "claim",
+    "release-gate"
   ],
   "principles": [
     "NO EVIDENCE -> NO VERIFIED CLAIM",
