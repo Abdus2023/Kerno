@@ -1,7 +1,7 @@
 {
   "schema": "agent.skill-manifest/1",
   "name": "kerno-reusable-process-system",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "skills": [
     "skill-creator",
     "process-kernel",
