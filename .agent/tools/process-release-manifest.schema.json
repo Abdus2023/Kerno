@@ -1,0 +1,15 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://kerno.dev/.agent/tools/process-release-manifest.schema.json",
+  "title":"Process Release Manifest",
+  "type":"object",
+  "required":["id","version","status","artifacts","gates"],
+  "properties":{
+    "id":{"type":"string"},
+    "version":{"type":"string"},
+    "status":{"enum":["DRAFT","CANDIDATE","RELEASED","REVOKED"]},
+    "artifacts":{"type":"array","items":{"type":"object","required":["path","sha256"],"properties":{"path":{"type":"string"},"sha256":{"type":"string"}}}},
+    "gates":{"type":"array","items":{"type":"object","required":["id","status"],"properties":{"id":{"type":"string"},"status":{"enum":["PASS","FAIL","BLOCKED","PROVISIONAL"]},"evidence":{"type":"array"}}}}
+  },
+  "additionalProperties":false
+}
