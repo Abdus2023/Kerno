@@ -1,0 +1,14 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"agent.evidence-bundle/1",
+  "type":"object",
+  "required":["schema","snapshot","inventory","audit","evidence"],
+  "properties":{
+    "schema":{"const":"agent.evidence-bundle/1"},
+    "snapshot":{"type":"object"},
+    "inventory":{"type":"object"},
+    "audit":{"type":"object"},
+    "evidence":{"type":"array"}
+  },
+  "additionalProperties":false
+}
