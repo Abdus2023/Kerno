@@ -1,0 +1,16 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"agent.audit-artifact/1",
+  "type":"object",
+  "required":["schema","repository","ref","snapshot_commit","findings","evidence_ids","limitations"],
+  "properties":{
+    "schema":{"const":"agent.audit-artifact/1"},
+    "repository":{"type":"string"},
+    "ref":{"type":"string"},
+    "snapshot_commit":{"type":"string"},
+    "findings":{"type":"array"},
+    "evidence_ids":{"type":"array","items":{"type":"string"}},
+    "limitations":{"type":"array","items":{"type":"string"}}
+  },
+  "additionalProperties":false
+}
