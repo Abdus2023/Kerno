@@ -1,0 +1,12 @@
+{
+  "suite":"gpjk-state-machine",
+  "version":"1.0.0",
+  "cases":[
+    {"id":"s-ready","kind":"step","from":"pending","to":"ready","expected":true},
+    {"id":"s-run","kind":"step","from":"ready","to":"running","expected":true},
+    {"id":"s-complete","kind":"step","from":"running","to":"completed","expected":true},
+    {"id":"s-resurrect","kind":"step","from":"completed","to":"running","expected":false},
+    {"id":"e-start","kind":"execution","from":"pending","to":"running","expected":true},
+    {"id":"e-terminal-resurrect","kind":"execution","from":"failed","to":"running","expected":false}
+  ]
+}
