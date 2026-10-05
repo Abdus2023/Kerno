@@ -96,7 +96,11 @@ async function main(){
     state.phase="TAG";
     state.next=[];
     await Deno.writeTextFile(statePath, JSON.stringify(state,null,2)+"\n");
-    console.log(JSON.stringify({decision:"READY_FOR_TAG",phase:state.phase}));
+    if(pending==="snapshot") {
+    console.log(JSON.stringify({decision:"SNAPSHOT_REQUIRED",stage:"snapshot",message:"Bind the workflow to an exact commit and tree before audit."},null,2));
+    return;
+  }
+  console.log(JSON.stringify({decision:"READY_FOR_TAG",phase:state.phase}));
     return;
   }
 
