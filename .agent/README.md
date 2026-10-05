@@ -1,38 +1,77 @@
-# Kerno .agent reusable verification system
+# Kerno .agent reusable process system
 
-This directory packages the workflow developed during the Kerno → Arena VAR work as reusable agent skills and deterministic tool contracts.
+This directory packages the reusable methodology developed across the process-specification, transcript-analysis, verification, runtime-trust, protocol, governance, and release work.
 
-## Design rule
+## Core rule
 
-> NO EVIDENCE → NO VERIFIED CLAIM.
+> NO EVIDENCE -> NO VERIFIED CLAIM.
 
 The system separates:
-- discovery from verification
-- observation from inference
-- architecture from implementation
-- local inspection from execution evidence
-- execution truth from semantic interpretation
-- source-domain claims from local trust decisions
+- transcript observation from process extraction
+- deterministic operations from judgment
+- process definition from execution
+- evidence from verification
+- authorization from occurrence
+- local inspection from execution authority
+- implementation behavior from normative semantics
+- current evaluation from historical verification
+
+## End-to-end process
+
+`ACQUIRE -> LABEL -> EXTRACT -> MODEL -> SPECIFY -> DECOMPOSE -> CONTRACT -> TEST -> VERIFY -> PACKAGE -> RELEASE`
 
 ## Skill graph
 
 ```
-repo-deep-audit
+skill-creator
       |
-      +--> evidence-led-verification
+      +--> transcript-process-extraction
+      |          |
+      |          +--> process-specification
       |
-      +--> runtime-trust-design
-      |        |
-      |        +--> protocol-freeze
-      |        +--> federation-design
-      |        +--> market-design
+      +--> process-kernel
+      |          |
+      |          +--> process-orchestrator
       |
-      +--> repo-engineering-plan
+      +--> process-conformance
       |
-      +--> continuation-controller
+      +--> process-release
       |
-      +--> skill-creator
+      +--> existing repository / runtime / evidence skills
 ```
+
+## Reusable skills
+
+| Skill | Role |
+|---|---|
+| `skill-creator` | Convert proven workflows into reusable skills |
+| `process-kernel` | General workflow-to-process kernel |
+| `transcript-process-extraction` | Label and extract processes from transcripts |
+| `process-specification` | Build schema-first process definitions |
+| `process-orchestrator` | Coordinate the complete pipeline |
+| `process-conformance` | Generate and evaluate conformance tests |
+| `process-release` | Freeze, package, verify, and release process bundles |
+| `repo-deep-audit` | Deep repository inspection |
+| `evidence-led-verification` | Evidence and claim verification |
+| `runtime-trust-design` | Verifiable runtime architecture |
+| `protocol-freeze` | Protocol and conformance design |
+| `federation-design` | Cross-domain trust and delegation |
+| `market-design` | Assurance-aware execution market |
+| `continuation-controller` | Explicit continuation state |
+| `repo-engineering-plan` | Repo-ready engineering plans |
+
+## Tool contracts
+
+The `tools/` directory contains machine-readable contracts for:
+- process models
+- process decomposition
+- reusable skills
+- reusable tools
+- conformance manifests
+- release manifests
+- repository/evidence/verification operations
+
+These are contracts, not proof that an implementation executed them.
 
 ## Required labels
 
@@ -46,25 +85,15 @@ Use:
 - PROVISIONAL
 - BLOCKED
 
-## Core state machine
+## State discipline
 
-```
-DISCOVER
-  -> FREEZE
-  -> MODEL
-  -> IMPLEMENT
-  -> TEST
-  -> VERIFY
-  -> RELEASE_GATE
-  -> TAG
-```
+Never depend on phrases such as "continue as before" or undocumented conversation state.
 
-A claim may not cross a gate without the evidence required by that gate.
+Persist:
+`snapshot + process model + evidence ledger + decision record + verification report + continuation state`.
 
-## Tool contracts
+## Release discipline
 
-The `tools/` directory contains JSON contracts for the reusable operations. These are declarative contracts; an adapter may implement them with GitHub, local shell, CI, or another execution provider.
+`freeze -> formalize -> implement -> test -> release gate -> tag`
 
-## Important limitation
-
-These skills describe a verification discipline. They do not themselves prove that CI, remote Actions, hardware attestation, or another external authority actually ran. Execution evidence must come from the corresponding authority.
+The generated bundle must be independently inspectable and version-bound.
