@@ -1,0 +1,12 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://kerno.dev/.agent/tools/gpjk-interchange.schema.json",
+  "title":"GPJK Interchange Contract",
+  "type":"object","additionalProperties":false,
+  "required":["operation","accepted","executed"],
+  "properties":{
+    "operation":{"enum":["IMPORT","EXPORT"]},"accepted":{"type":"boolean"},"executed":{"const":false},
+    "package_id":{"type":"string"},"errors":{"type":"array","items":{"type":"string"}},
+    "dependencies":{"type":"array","items":{"type":"object","additionalProperties":true}}
+  }
+}
