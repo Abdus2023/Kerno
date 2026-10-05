@@ -18,7 +18,8 @@
     "repository-inventory",
     "evidence-bundle",
     "github-acquisition",
-    "execution-evidence"
+    "execution-evidence",
+    "execution-verification"
   ],
   "tools": [
     "repository-snapshot",
@@ -28,7 +29,8 @@
     "claim",
     "release-gate",
     "execution-evidence.schema.json",
-    "execution-claim.schema.json"
+    "execution-claim.schema.json",
+    "execution-verification.schema.json"
   ],
   "principles": [
     "NO EVIDENCE -> NO VERIFIED CLAIM",
