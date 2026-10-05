@@ -1,0 +1,25 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://kerno.dev/.agent/tools/evidence-ledger.schema.json",
+  "title":"Evidence Ledger Contract",
+  "type":"object",
+  "additionalProperties":false,
+  "required":["version","entries","claims"],
+  "properties":{
+    "version":{"type":"string"},
+    "entries":{"type":"array","items":{"$ref":"#/$defs/entry"}},
+    "claims":{"type":"array","items":{"$ref":"#/$defs/claim"}}
+  },
+  "$defs":{
+    "entry":{"type":"object","additionalProperties":false,"required":["id","status","source"],"properties":{
+      "id":{"type":"string","minLength":1},"status":{"enum":["OBSERVED","DERIVED","VERIFIED","ANNOTATED"]},
+      "source":{"type":"string","minLength":1},"scope":{"type":"string"},"created":{"type":"string","format":"date-time"},
+      "actor":{"type":"string"},"hash":{"type":"object","additionalProperties":false,"required":["algorithm","value"],"properties":{"algorithm":{"type":"string"},"value":{"type":"string"}}},
+      "derivedFrom":{"type":"array","items":{"type":"string"}},"supports":{"type":"array","items":{"type":"string"}}
+    }},
+    "claim":{"type":"object","additionalProperties":false,"required":["id","assertion"],"properties":{
+      "id":{"type":"string","minLength":1},"assertion":{"type":"string","minLength":1},"evidence":{"type":"array","items":{"type":"string"}},
+      "status":{"enum":["PROVED","ARGUMENT","CONJECTURE","OPEN","VERIFIED","PARTIALLY_VERIFIED","PROVISIONAL","BLOCKED"]}
+    }}
+  }
+}
