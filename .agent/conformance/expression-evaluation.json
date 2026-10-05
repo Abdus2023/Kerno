@@ -5,6 +5,6 @@
     {"id":"x-true","expression":"gpjk:input:amount > 100","context":{"input":{"amount":4200}},"expected":"TRUE"},
     {"id":"x-false","expression":"gpjk:input:amount > 100","context":{"input":{"amount":50}},"expected":"FALSE"},
     {"id":"x-unknown","expression":"gpjk:input:amount > 100","context":{"input":{}},"expected":"UNKNOWN"},
-    {"id":"x-no-coercion","expression":"gpjk:input:amount == "4200"","context":{"input":{"amount":4200}},"expected":"FALSE"}
+    {"id":"x-no-coercion","expression":"gpjk:input:amount == \"4200\"","context":{"input":{"amount":4200}},"expected":"FALSE"}
   ]
 }
