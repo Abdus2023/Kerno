@@ -1,0 +1,8 @@
+{
+  "suite":"gpjk-interchange",
+  "version":"1.0.0",
+  "cases":[
+    {"id":"i-import-no-execute","operation":"IMPORT","package":{"id":"p-001"},"expected":{"accepted":true,"executed":false}},
+    {"id":"i-missing-dependency","operation":"IMPORT","package":{"id":"p-002","dependency":"missing@1.0.0"},"expected":{"accepted":false,"executed":false}}
+  ]
+}
