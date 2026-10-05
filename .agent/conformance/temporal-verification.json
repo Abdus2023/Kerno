@@ -1,0 +1,9 @@
+{
+  "suite":"gpjk-temporal-verification",
+  "version":"1.0.0",
+  "cases":[
+    {"id":"t-valid","occurrenceTime":"2026-10-05T10:00:00Z","validityTime":"2026-10-05/2026-10-06","evaluationTime":"2026-10-05T12:00:00Z","expected":"PASSED"},
+    {"id":"t-expired","occurrenceTime":"2026-10-04T10:00:00Z","validityTime":"2026-10-04/2026-10-05","evaluationTime":"2026-10-06T12:00:00Z","expected":"FAILED"},
+    {"id":"t-timeout-not-occurrence","event":"timeout","externalConfirmation":false,"expected":"INDETERMINATE"}
+  ]
+}
