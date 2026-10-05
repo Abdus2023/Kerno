@@ -1,0 +1,10 @@
+{
+  "suite":"gpjk-reference-resolution",
+  "version":"1.0.0",
+  "cases":[
+    {"id":"rr-value","reference":"gpjk:input:amount","context":{"input":{"amount":4200}},"expected":{"status":"VALUE","value":4200}},
+    {"id":"rr-null","reference":"gpjk:input:note","context":{"input":{"note":null}},"expected":{"status":"NULL"}},
+    {"id":"rr-missing","reference":"gpjk:input:missing","context":{"input":{}},"expected":{"status":"MISSING"}},
+    {"id":"rr-unresolved","reference":"bad-reference","context":{},"expected":{"status":"UNRESOLVED"}}
+  ]
+}
