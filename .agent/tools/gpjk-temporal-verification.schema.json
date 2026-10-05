@@ -1,0 +1,13 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://kerno.dev/.agent/tools/gpjk-temporal-verification.schema.json",
+  "title":"GPJK Temporal Verification Contract",
+  "type":"object","additionalProperties":false,
+  "required":["result"],
+  "properties":{
+    "result":{"enum":["PASSED","FAILED","INDETERMINATE"]},
+    "occurrenceTime":{"type":"string","format":"date-time"},"recordingTime":{"type":"string","format":"date-time"},
+    "validityTime":{"type":"string"},"evaluationTime":{"type":"string","format":"date-time"},
+    "trace":{"type":"array","items":{"type":"object","additionalProperties":true}}
+  }
+}
