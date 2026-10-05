@@ -14,7 +14,8 @@
     "repo-engineering-plan",
     "agent-workflow",
     "adapter-contracts",
-    "repo-audit-adapter"
+    "repo-audit-adapter",
+    "repository-inventory"
   ],
   "tools": [
     "repository-snapshot",
