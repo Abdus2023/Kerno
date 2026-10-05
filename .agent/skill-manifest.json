@@ -16,7 +16,8 @@
     "adapter-contracts",
     "repo-audit-adapter",
     "repository-inventory",
-    "evidence-bundle"
+    "evidence-bundle",
+    "github-acquisition"
   ],
   "tools": [
     "repository-snapshot",
