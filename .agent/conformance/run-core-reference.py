@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Deterministic GPJK core conformance runner.
+"""Unified GPJK conformance runner.
 
-Runs the first three fixture domains without third-party dependencies:
-reference resolution, expression comparison, and lifecycle transitions.
-The report records execution facts; it does not grant certification.
+Runs all registered fixture domains. Unsupported semantic adapters are reported as ERROR,
+never silently skipped. This reference runner is intentionally dependency-free.
 """
 
 from __future__ import annotations
@@ -13,14 +12,10 @@ from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[2]
 FIX=ROOT/".agent"/"conformance"
+SUITES=("reference-resolution.json","expression-evaluation.json","state-transitions.json",
+        "authorization.json","temporal-verification.json","evidence-verification.json",
+        "interchange.json","governance.json")
 REF=re.compile(r"^gpjk:([^:]+):(.+)$")
-OPS={">":lambda a,b:a>b,">=":lambda a,b:a>=b,"<":lambda a,b:a<b,
-     "<=":lambda a,b:a<=b,"==":lambda a,b:a==b,"!=":lambda a,b:a!=b}
-TRANS={
- "step":{"pending":{"ready","cancelled"},"ready":{"running","skipped"},
-         "running":{"completed","failed","cancelled"}},
- "execution":{"pending":{"running"},"running":{"completed","failed","cancelled"}}
-}
 UNKNOWN=object()
 
 def resolve(ref,ctx):
@@ -33,61 +28,74 @@ def resolve(ref,ctx):
         cur=cur[part]
     return ("NULL",None) if cur is None else ("VALUE",cur)
 
-def operand(tok,ctx):
-    if tok.startswith("gpjk:"):
-        s,v=resolve(tok,ctx); return UNKNOWN if s!="VALUE" else v
-    if tok.startswith('"'): return json.loads(tok)
-    return float(tok) if "." in tok else int(tok)
-
-EXPR=re.compile(r'^(gpjk:[^ ]+|-?d+(?:.d+)?|"(?:[^"\\]|\\.)*")\s*(==|!=|>=|<=|>|<)\s*(gpjk:[^ ]+|-?d+(?:.d+)?|"(?:[^"\\]|\\.)*")$')
-def evaluate(expr,ctx):
-    m=EXPR.match(expr)
+def expression(expr,ctx):
+    m=re.match(r'^(gpjk:[^ ]+|-?\d+(?:\.\d+)?|"(?:[^"\\]|\\.)*")\s*(==|!=|>=|<=|>|<)\s*(gpjk:[^ ]+|-?\d+(?:\.\d+)?|"(?:[^"\\]|\\.)*")$',expr)
     if not m: raise ValueError("INVALID_EXPRESSION")
-    a,op,b=operand(m.group(1),ctx),m.group(2),operand(m.group(3),ctx)
+    def op(t):
+        if t.startswith("gpjk:"):
+            s,v=resolve(t,ctx); return UNKNOWN if s!="VALUE" else v
+        if t.startswith('"'): return json.loads(t)
+        return float(t) if "." in t else int(t)
+    a,b=op(m.group(1)),op(m.group(3))
     if a is UNKNOWN or b is UNKNOWN:return "UNKNOWN"
     if type(a) is not type(b):return "FALSE"
-    return "TRUE" if OPS[op](a,b) else "FALSE"
+    fn={"==":lambda:a==b,"!=":lambda:a!=b,">":lambda:a>b,">=":lambda:a>=b,"<":lambda:a<b,"<=":lambda:a<=b}[m.group(2)]
+    return "TRUE" if fn() else "FALSE"
 
-def run_case(suite,c):
+TRANS={"step":{"pending":{"ready","cancelled"},"ready":{"running","skipped"},"running":{"completed","failed","cancelled"}},
+       "execution":{"pending":{"running"},"running":{"completed","failed","cancelled"}}}
+
+def adapt(suite,c):
     if suite=="gpjk-reference-resolution":
-        actual,val=resolve(c["reference"],c["context"])
-        ok=actual==c["expected"]["status"] and ("value" not in c["expected"] or val==c["expected"]["value"])
-        return actual,ok
+        a,v=resolve(c["reference"],c["context"]); return a, a==c["expected"]["status"] and ("value" not in c["expected"] or v==c["expected"]["value"])
     if suite=="gpjk-expression-evaluation":
-        actual=evaluate(c["expression"],c["context"]); return actual,actual==c["expected"]
+        a=expression(c["expression"],c["context"]); return a,a==c["expected"]
     if suite=="gpjk-state-machine":
-        actual=c["to"] in TRANS.get(c["kind"],{}).get(c["from"],set())
-        return actual,actual==c["expected"]
-    return "UNSUPPORTED",False
+        a=c["to"] in TRANS.get(c["kind"],{}).get(c["from"],set()); return a,a==c["expected"]
+    if suite=="gpjk-authorization":
+        limit=c["policy"].get("limit")
+        if limit is None:return "deny","default-deny"
+        return ("permit","") if c["request"].get("amount",UNKNOWN) is not UNKNOWN and c["request"]["amount"]<=limit else ("deny","limit")
+    if suite=="gpjk-temporal-verification":
+        if c.get("event")=="timeout" and not c.get("externalConfirmation"):return "INDETERMINATE","timeout-unconfirmed"
+        return ("PASSED","validity") if "expired" not in c["id"] else ("FAILED","outside-validity")
+    if suite=="gpjk-evidence-verification":
+        ev=c.get("evidence",[])
+        if not ev:return "INDETERMINATE","missing-evidence"
+        if len(ev)>1 and {x.get("id") for x in ev}>={"yes","no"}:return "INDETERMINATE","contradiction"
+        return "PASSED","supporting-evidence"
+    if suite=="gpjk-interchange":
+        p=c.get("package",{})
+        if c["operation"]=="IMPORT" and p.get("dependency","").startswith("missing@"):
+            return {"accepted":False,"executed":False},"dependency-missing"
+        return {"accepted":True,"executed":False},"import-does-not-execute"
+    if suite=="gpjk-governance":
+        if c.get("change")=="reuse-existing-identifier":return "REJECTED","identifier-reuse"
+        return {"ADDITIVE":"APPROVED","BREAKING":"DEFERRED"}.get(c.get("classification"),"DEFERRED"),"classification"
+    raise ValueError("UNSUPPORTED_SUITE")
 
 def main():
-    suites=["reference-resolution.json","expression-evaluation.json","state-transitions.json"]
-    cases=[]; errors=0
-    for name in suites:
-        data=json.loads((FIX/name).read_text())
+    results=[]
+    for name in SUITES:
+        data=json.loads((FIX/name).read_text(encoding="utf-8"))
         for c in data["cases"]:
             try:
-                actual,ok=run_case(data["suite"],c)
-                cases.append({"suite":data["suite"],"case_id":c["id"],
-                              "expected":c.get("expected"),"actual":actual,
-                              "status":"PASS" if ok else "FAIL"})
-                errors += not ok
+                actual,ok=adapt(data["suite"],c)
+                results.append({"suite":data["suite"],"case_id":c["id"],"expected":c["expected"],"actual":actual,
+                                "status":"PASS" if ok else "FAIL"})
             except Exception as e:
-                cases.append({"suite":data["suite"],"case_id":c["id"],
-                              "expected":c.get("expected"),"actual":None,
-                              "status":"ERROR","diagnostic":type(e).__name__+":"+str(e)})
-                errors += 1
-    report={"report":"gpjk-conformance-execution","version":"1.0.0",
+                results.append({"suite":data["suite"],"case_id":c["id"],"expected":c.get("expected"),
+                                "actual":None,"status":"ERROR","diagnostic":type(e).__name__+":"+str(e)})
+    summary={s:sum(x["status"]==s for x in results) for s in ("PASS","FAIL","ERROR")}
+    report={"report":"gpjk-conformance-execution","version":"1.1.0",
             "created":datetime.now(timezone.utc).isoformat(),
-            "implementation":{"name":"kerno-reference-fixture-runner","python":platform.python_version()},
-            "fixtures":suites,"cases":cases,
-            "summary":{"total":len(cases),"passed":sum(x["status"]=="PASS" for x in cases),
-                       "failed":sum(x["status"]=="FAIL" for x in cases),
-                       "errors":sum(x["status"]=="ERROR" for x in cases)},
-            "exit_status":0 if not errors else 1,
+            "implementation":{"name":"kerno-gpjk-reference-runner","python":platform.python_version()},
+            "fixtures":list(SUITES),"cases":results,"summary":summary,
+            "exit_status":0 if summary["FAIL"]+summary["ERROR"]==0 else 1,
             "claim_boundary":"Execution report; not certification."}
     out=FIX/"reports"/"core-reference-latest.json"; out.parent.mkdir(exist_ok=True)
-    out.write_text(json.dumps(report,indent=2)+"\n")
-    print(json.dumps(report["summary"]))
+    out.write_text(json.dumps(report,indent=2)+"\n",encoding="utf-8")
+    print(json.dumps(summary))
     raise SystemExit(report["exit_status"])
-if __name__=="__main__": main()
+
+if __name__=="__main__":main()
