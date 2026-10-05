@@ -1,0 +1,17 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://kerno.dev/.agent/tools/process-model.schema.json",
+  "title":"Reusable Process Model",
+  "type":"object",
+  "required":["id","version","inputs","outputs","steps","gates","evidence"],
+  "properties":{
+    "id":{"type":"string","minLength":1},
+    "version":{"type":"string","minLength":1},
+    "inputs":{"type":"array","items":{"type":"object","required":["id"],"properties":{"id":{"type":"string"},"required":{"type":"boolean"}}}},
+    "outputs":{"type":"array","items":{"type":"object","required":["id"],"properties":{"id":{"type":"string"}}}},
+    "steps":{"type":"array","items":{"type":"object","required":["id","kind"],"properties":{"id":{"type":"string"},"kind":{"enum":["deterministic","judgment","gate","output"]},"requires":{"type":"array"},"produces":{"type":"array"},"dependsOn":{"type":"array"}}}},
+    "gates":{"type":"array","items":{"type":"object","required":["id","condition"],"properties":{"id":{"type":"string"},"condition":{"type":"string"},"onFailure":{"enum":["STOP","BLOCK","PROVISIONAL"]}}}},
+    "evidence":{"type":"array","items":{"type":"object","required":["id","status"],"properties":{"id":{"type":"string"},"status":{"enum":["OBSERVED","DERIVED","VERIFIED","EXECUTED"]},"source":{"type":"string"}}}}
+  },
+  "additionalProperties":false
+}
