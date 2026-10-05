@@ -1,0 +1,21 @@
+{
+  "name":"release-gate",
+  "version":"1",
+  "purpose":"Prevent a release claim unless the exact artifact and verification evidence are bound together.",
+  "input":{
+    "artifact_digest":"string",
+    "verification_digest":"string",
+    "snapshot_commit":"string",
+    "required_checks":["string"]
+  },
+  "output":{
+    "decision":"PASS|FAIL|BLOCKED",
+    "release_identity":"string",
+    "missing":["string"]
+  },
+  "invariants":[
+    "artifact identity must be explicit",
+    "verification must cover the artifact",
+    "missing execution evidence blocks release claims"
+  ]
+}
