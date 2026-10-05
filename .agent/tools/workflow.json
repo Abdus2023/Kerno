@@ -1,0 +1,21 @@
+{
+  "schema": "agent.workflow/1",
+  "name": "deep-verification",
+  "stages": [
+    {"id":"snapshot","skill":"repo-deep-audit","tool":"repository-snapshot","required":true},
+    {"id":"audit","skill":"repo-deep-audit","required":true},
+    {"id":"evidence","skill":"evidence-led-verification","tool":"evidence-record","required":true},
+    {"id":"verify","skill":"evidence-led-verification","tool":"verification-gate","required":true},
+    {"id":"trust-design","skill":"runtime-trust-design","required":false},
+    {"id":"protocol","skill":"protocol-freeze","required":false},
+    {"id":"federation","skill":"federation-design","required":false},
+    {"id":"market","skill":"market-design","required":false},
+    {"id":"plan","skill":"repo-engineering-plan","required":true},
+    {"id":"release-gate","required":true}
+  ],
+  "transition_rules": {
+    "verified_requires": ["evidence", "verification"],
+    "release_requires": ["snapshot", "verification", "plan"],
+    "blocked_is_terminal_until_evidence_changes": true
+  }
+}
