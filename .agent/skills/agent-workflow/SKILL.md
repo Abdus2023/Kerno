@@ -81,3 +81,8 @@ Never:
 - inherit a previous conversation's unrecorded state
 - call an implementation "verified" because it looks correct
 - mix evidence from multiple commits without recording transitions
+
+
+## Adapters
+
+Reference implementations live under `.agent/adapters/`. They are deliberately authority-explicit. `repository-snapshot` binds the run to a Git object; `repo-audit` observes repository contents; `evidence-record` normalizes observations; `verification-gate` refuses a PASS when evidence is absent. These local adapters do not constitute CI or remote execution evidence.
