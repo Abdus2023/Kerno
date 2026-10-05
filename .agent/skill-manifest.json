@@ -1,9 +1,15 @@
 {
   "schema": "agent.skill-manifest/1",
-  "name": "kerno-verification-pack",
-  "version": "0.1.0",
+  "name": "kerno-reusable-process-system",
+  "version": "0.2.0",
   "skills": [
     "skill-creator",
+    "process-kernel",
+    "transcript-process-extraction",
+    "process-specification",
+    "process-orchestrator",
+    "process-conformance",
+    "process-release",
     "repo-deep-audit",
     "evidence-led-verification",
     "runtime-trust-design",
@@ -22,6 +28,12 @@
     "execution-verification"
   ],
   "tools": [
+    "process-model.schema.json",
+    "process-decomposition.schema.json",
+    "skill-contract.schema.json",
+    "process-tool.schema.json",
+    "conformance-manifest.schema.json",
+    "process-release-manifest.schema.json",
     "repository-snapshot",
     "evidence-record",
     "verification-gate",
@@ -36,6 +48,7 @@
     "NO EVIDENCE -> NO VERIFIED CLAIM",
     "OBSERVED != DERIVED != VERIFIED != EXECUTED",
     "CI is execution authority; local inspection is diagnostic evidence",
-    "freeze -> formalize -> implement -> test -> release gate -> tag"
+    "freeze -> formalize -> implement -> test -> release gate -> tag",
+    "Core semantics are explicit; profiles and governance do not silently redefine Core"
   ]
 }
