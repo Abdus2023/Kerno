@@ -1,0 +1,12 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://kerno.dev/.agent/tools/conformance-suite.schema.json",
+  "title":"Process Conformance Suite",
+  "type":"object","additionalProperties":false,
+  "required":["suite","version","cases"],
+  "properties":{
+    "suite":{"type":"string","minLength":1},
+    "version":{"type":"string","minLength":1},
+    "cases":{"type":"array","items":{"type":"object","additionalProperties":true}}
+  }
+}
