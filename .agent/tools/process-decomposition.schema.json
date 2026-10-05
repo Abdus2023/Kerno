@@ -1,0 +1,15 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://kerno.dev/.agent/tools/process-decomposition.schema.json",
+  "title":"Process Decomposition Contract",
+  "type":"object",
+  "required":["source","operations","judgments","deterministic","artifacts"],
+  "properties":{
+    "source":{"type":"string"},
+    "operations":{"type":"array","items":{"type":"object","required":["id","description"],"properties":{"id":{"type":"string"},"description":{"type":"string"},"evidenceRefs":{"type":"array","items":{"type":"string"}}}}},
+    "judgments":{"type":"array","items":{"type":"object","required":["id","decisionRule"],"properties":{"id":{"type":"string"},"decisionRule":{"type":"string"},"inputs":{"type":"array"}}}},
+    "deterministic":{"type":"array","items":{"type":"string"}},
+    "artifacts":{"type":"array","items":{"type":"string"}}
+  },
+  "additionalProperties":false
+}
