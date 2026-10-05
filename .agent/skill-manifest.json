@@ -12,7 +12,8 @@
     "market-design",
     "continuation-controller",
     "repo-engineering-plan",
-    "agent-workflow"
+    "agent-workflow",
+    "adapter-contracts"
   ],
   "tools": [
     "repository-snapshot",
