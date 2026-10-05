@@ -1,0 +1,9 @@
+{
+  "suite":"gpjk-governance",
+  "version":"1.0.0",
+  "cases":[
+    {"id":"g-additive","classification":"ADDITIVE","expected":"APPROVED"},
+    {"id":"g-breaking-review","classification":"BREAKING","expected":"DEFERRED"},
+    {"id":"g-reuse-id","change":"reuse-existing-identifier","expected":"REJECTED"}
+  ]
+}
