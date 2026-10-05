@@ -1,0 +1,15 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "title":"Agent Claim",
+  "type":"object",
+  "required":["claim_id","statement","scope","required_status","evidence_ids"],
+  "properties":{
+    "claim_id":{"type":"string"},
+    "statement":{"type":"string"},
+    "scope":{"type":"string"},
+    "required_status":{"enum":["PROVED","VERIFIED"]},
+    "evidence_ids":{"type":"array","items":{"type":"string"}},
+    "status":{"enum":["PROVED","VERIFIED","PARTIALLY_VERIFIED","PROVISIONAL","BLOCKED"]},
+    "reason":{"type":"string"}
+  }
+}
