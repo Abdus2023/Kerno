@@ -1,0 +1,11 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://kerno.dev/.agent/tools/gpjk-state-transition.schema.json",
+  "title":"GPJK State Transition Contract",
+  "type":"object","additionalProperties":false,
+  "required":["kind","from","to","accepted"],
+  "properties":{
+    "kind":{"enum":["execution","step"]},"from":{"type":"string"},"to":{"type":"string"},
+    "accepted":{"type":"boolean"},"reason":{"type":"string"},"event_id":{"type":"string"}
+  }
+}
