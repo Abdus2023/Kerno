@@ -1,0 +1,28 @@
+{
+  "suite":"gpjk-reference-conformance",
+  "version":"1.0.0",
+  "runner_contract":{
+    "input":["implementation","fixture"],
+    "output":["case_id","expected","actual","status","diagnostic"],
+    "statuses":["PASS","FAIL","ERROR"]
+  },
+  "domains":[
+    "reference-resolution",
+    "expression-evaluation",
+    "state-machine",
+    "authorization",
+    "temporal-verification",
+    "evidence-verification",
+    "interchange",
+    "governance"
+  ],
+  "evidence":{
+    "required":["implementation_identity","fixture_suite","invocation","timestamp","case_results","exit_status","environment"],
+    "execution_authority":"CI"
+  },
+  "claim_boundary":{
+    "fixture_present":"OBSERVED",
+    "harness_pass":"EXECUTED",
+    "implementation_conformance":"VERIFIED_ONLY_WITH_SUFFICIENT_EVIDENCE"
+  }
+}
