@@ -1,0 +1,22 @@
+{
+  "name": "repository-snapshot",
+  "version": "1",
+  "purpose": "Freeze repository identity before analysis or verification.",
+  "input": {
+    "repository": "owner/name",
+    "ref": "branch|tag|commit"
+  },
+  "output": {
+    "repository": "owner/name",
+    "ref": "string",
+    "commit": "sha256-like git object id",
+    "tree": "git tree id",
+    "parent": "optional git object id",
+    "observed_at": "RFC3339",
+    "source": "github|local|other"
+  },
+  "invariants": [
+    "Never mix evidence from different frozen snapshots without recording the transition.",
+    "A missing commit identity blocks VERIFIED status."
+  ]
+}

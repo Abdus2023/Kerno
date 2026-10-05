@@ -1,0 +1,22 @@
+{
+  "name": "verification-gate",
+  "version": "1",
+  "purpose": "Evaluate whether a claim has sufficient evidence for a requested assurance state.",
+  "input": {
+    "claim": "string",
+    "required_scope": "string",
+    "evidence_ids": ["string"],
+    "required_state": "PROVED|VERIFIED"
+  },
+  "output": {
+    "decision": "PASS|FAIL|INDETERMINATE|BLOCKED",
+    "status": "PROVED|VERIFIED|PARTIALLY_VERIFIED|PROVISIONAL|BLOCKED",
+    "reasons": ["string"],
+    "missing_evidence": ["string"]
+  },
+  "invariants": [
+    "No evidence means no VERIFIED claim.",
+    "Evidence scope must cover claim scope.",
+    "Inference cannot substitute for execution evidence."
+  ]
+}

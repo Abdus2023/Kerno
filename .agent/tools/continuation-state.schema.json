@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Agent Continuation State",
+  "type": "object",
+  "required": ["schema", "objective", "phase", "snapshot", "completed", "open", "blocked", "next"],
+  "properties": {
+    "schema": {"const": "agent.continuation-state/1"},
+    "objective": {"type": "string"},
+    "phase": {"enum": ["DISCOVER","FREEZE","MODEL","IMPLEMENT","TEST","VERIFY","RELEASE_GATE","TAG"]},
+    "snapshot": {"type": "object"},
+    "completed": {"type": "array", "items": {"type": "string"}},
+    "open": {"type": "array", "items": {"type": "string"}},
+    "blocked": {"type": "array", "items": {"type": "string"}},
+    "next": {"type": "array", "items": {"type": "string"}},
+    "evidence_digest": {"type": "string"}
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "schema": "agent.skill-manifest/1",
+  "name": "kerno-verification-pack",
+  "version": "0.1.0",
+  "skills": [
+    "skill-creator",
+    "repo-deep-audit",
+    "evidence-led-verification",
+    "runtime-trust-design",
+    "protocol-freeze",
+    "federation-design",
+    "market-design",
+    "continuation-controller",
+    "repo-engineering-plan"
+  ],
+  "tools": [
+    "repository-snapshot",
+    "evidence-record",
+    "verification-gate"
+  ],
+  "principles": [
+    "NO EVIDENCE -> NO VERIFIED CLAIM",
+    "OBSERVED != DERIVED != VERIFIED != EXECUTED",
+    "CI is execution authority; local inspection is diagnostic evidence",
+    "freeze -> formalize -> implement -> test -> release gate -> tag"
+  ]
+}

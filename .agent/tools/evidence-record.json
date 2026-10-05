@@ -1,0 +1,22 @@
+{
+  "name": "evidence-record",
+  "version": "1",
+  "purpose": "Normalize an observation into a traceable evidence object.",
+  "input": {
+    "source": "string",
+    "locator": "string",
+    "scope": "string",
+    "observation": "string",
+    "snapshot": "string",
+    "extraction_method": "string"
+  },
+  "output": {
+    "evidence_id": "algorithm:digest",
+    "status": "OBSERVED|NOT_FOUND|NOT_PRESENT|NOT_REACHABLE|NOT_OBSERVABLE|PARTIAL|STALE|MISMATCH|CONTRADICTED",
+    "limitations": ["string"]
+  },
+  "invariants": [
+    "Evidence must preserve scope.",
+    "Negative states must not be encoded as null."
+  ]
+}
