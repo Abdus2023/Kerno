@@ -1,0 +1,20 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://kerno.dev/.agent/tools/skill-contract.schema.json",
+  "title":"Reusable Agent Skill Contract",
+  "type":"object",
+  "required":["name","description","purpose","inputs","outputs","procedure","gates","failureModes","evidencePolicy","continuation"],
+  "properties":{
+    "name":{"type":"string","pattern":"^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "description":{"type":"string","minLength":1},
+    "purpose":{"type":"string"},
+    "inputs":{"type":"array"},
+    "outputs":{"type":"array"},
+    "procedure":{"type":"array","minItems":1},
+    "gates":{"type":"array"},
+    "failureModes":{"type":"array"},
+    "evidencePolicy":{"type":"string"},
+    "continuation":{"type":"string"}
+  },
+  "additionalProperties":false
+}
