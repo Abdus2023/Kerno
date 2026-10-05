@@ -1,0 +1,25 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"agent.execution-evidence/1",
+  "type":"object",
+  "required":["schema","execution_id","authority","kind","repository","ref","commit","tree","status","observed_at","limitations"],
+  "properties":{
+    "schema":{"const":"agent.execution-evidence/1"},
+    "execution_id":{"type":"string","minLength":1},
+    "authority":{"type":"string","minLength":1},
+    "kind":{"enum":["CI","TEST","BUILD","LINT","SECURITY_SCAN","OTHER"]},
+    "repository":{"type":"string"},
+    "ref":{"type":"string"},
+    "commit":{"type":"string"},
+    "tree":{"type":"string"},
+    "status":{"enum":["PASSED","FAILED","CANCELLED","TIMED_OUT","NOT_OBSERVABLE"]},
+    "command":{"type":"string"},
+    "run_url":{"type":"string","format":"uri"},
+    "started_at":{"type":"string","format":"date-time"},
+    "finished_at":{"type":"string","format":"date-time"},
+    "observed_at":{"type":"string","format":"date-time"},
+    "output_digest":{"type":"string"},
+    "limitations":{"type":"array","items":{"type":"string"}}
+  },
+  "additionalProperties":false
+}
