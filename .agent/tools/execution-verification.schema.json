@@ -1,0 +1,13 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"agent.execution-verification/1",
+  "type":"object",
+  "required":["claim_id","decision","matched_execution_ids","reason"],
+  "properties":{
+    "claim_id":{"type":"string"},
+    "decision":{"enum":["PASS","FAIL","INDETERMINATE","BLOCKED"]},
+    "matched_execution_ids":{"type":"array","items":{"type":"string"}},
+    "reason":{"type":"string"}
+  },
+  "additionalProperties":false
+}
