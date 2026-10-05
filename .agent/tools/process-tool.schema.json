@@ -1,0 +1,18 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://kerno.dev/.agent/tools/process-tool.schema.json",
+  "title":"Reusable Process Tool Contract",
+  "type":"object",
+  "required":["name","description","input","output","errors","deterministic"],
+  "properties":{
+    "name":{"type":"string","pattern":"^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "description":{"type":"string"},
+    "input":{"type":"object"},
+    "output":{"type":"object"},
+    "errors":{"type":"array","items":{"type":"string"}},
+    "deterministic":{"type":"boolean"},
+    "sideEffects":{"type":"boolean"},
+    "authority":{"type":"string"}
+  },
+  "additionalProperties":false
+}
