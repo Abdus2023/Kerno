@@ -1,0 +1,14 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"agent.execution-claim/1",
+  "type":"object",
+  "required":["claim_id","statement","snapshot","required_kind","evidence_ids"],
+  "properties":{
+    "claim_id":{"type":"string"},
+    "statement":{"type":"string"},
+    "snapshot":{"type":"object","required":["repository","commit","tree"]},
+    "required_kind":{"enum":["CI","TEST","BUILD","LINT","SECURITY_SCAN","OTHER"]},
+    "evidence_ids":{"type":"array","items":{"type":"string"}}
+  },
+  "additionalProperties":false
+}
