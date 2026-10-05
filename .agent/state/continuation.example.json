@@ -1,0 +1,26 @@
+{
+  "schema":"agent.continuation-state/1",
+  "objective":"Deep repository verification",
+  "snapshot":{
+    "repository":"Abdus2023/Kerno",
+    "ref":"agent/reusable-verification-skills",
+    "commit":"REPLACE_WITH_EXACT_COMMIT"
+  },
+  "phase":"FREEZE",
+  "stages":[
+    {"id":"snapshot","status":"PENDING","phase":"FREEZE","evidence_ids":[],"blockers":[],"authority":"repository"},
+    {"id":"audit","status":"PENDING","phase":"MODEL","evidence_ids":[],"blockers":[],"authority":"repository"},
+    {"id":"evidence","status":"PENDING","phase":"TEST","evidence_ids":[],"blockers":[],"authority":"evidence-led-verification"},
+    {"id":"verify","status":"PENDING","phase":"VERIFY","evidence_ids":[],"blockers":[],"authority":"independent-verifier"},
+    {"id":"trust-design","status":"PENDING","phase":"MODEL","evidence_ids":[],"blockers":[],"authority":"architecture"},
+    {"id":"protocol","status":"PENDING","phase":"MODEL","evidence_ids":[],"blockers":[],"authority":"protocol-conformance"},
+    {"id":"federation","status":"PENDING","phase":"MODEL","evidence_ids":[],"blockers":[],"authority":"trust-domain"},
+    {"id":"market","status":"PENDING","phase":"MODEL","evidence_ids":[],"blockers":[],"authority":"settlement"},
+    {"id":"plan","status":"PENDING","phase":"IMPLEMENT","evidence_ids":[],"blockers":[],"authority":"engineering"},
+    {"id":"release-gate","status":"PENDING","phase":"RELEASE_GATE","evidence_ids":[],"blockers":[],"authority":"release"}
+  ],
+  "completed":[],
+  "open":["snapshot"],
+  "blocked":[],
+  "next":["snapshot"]
+}
