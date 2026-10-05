@@ -4,3 +4,4 @@ export {verify} from "./verification-gate.ts";
 export {audit} from "./repo-audit.ts";
 export {inventory} from "./repository-inventory.ts";
 export {acquirePinnedSnapshot} from "./github-acquisition.ts";
+export {recordExecution, bindExecutionToSnapshot} from "./execution-evidence.ts";
