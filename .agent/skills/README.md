@@ -51,6 +51,14 @@ skill-creator
 | `process-orchestrator` | Coordinate the complete pipeline |
 | `process-conformance` | Generate and evaluate conformance tests |
 | `process-release` | Freeze, package, verify, and release process bundles |
+| `evidence-ledger` | Build claim/evidence/provenance ledgers |
+| `gpjk-reference-resolution` | Resolve VALUE/NULL/MISSING/UNRESOLVED references |
+| `gpjk-expression-evaluation` | Evaluate strict three-valued GPJK expressions |
+| `gpjk-state-machine` | Enforce execution and step lifecycle transitions |
+| `gpjk-authorization` | Evaluate authority separately from occurrence and verification |
+| `gpjk-temporal-verification` | Verify explicit temporal semantics |
+| `gpjk-interchange` | Import/export packages without implicit execution |
+| `gpjk-governance` | Govern semantic evolution and historical compatibility |
 | `repo-deep-audit` | Deep repository inspection |
 | `evidence-led-verification` | Evidence and claim verification |
 | `runtime-trust-design` | Verifiable runtime architecture |
@@ -59,6 +67,10 @@ skill-creator
 | `market-design` | Assurance-aware execution market |
 | `continuation-controller` | Explicit continuation state |
 | `repo-engineering-plan` | Repo-ready engineering plans |
+
+## Semantic process skills
+
+The GPJK layer now has explicit reusable boundaries for evidence, references, expressions, state, authorization, time, interchange, and governance. These skills are intentionally implementation-neutral; concrete runtimes must satisfy their contracts and provide execution evidence.
 
 ## Tool contracts
 
