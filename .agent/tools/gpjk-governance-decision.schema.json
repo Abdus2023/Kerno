@@ -1,0 +1,13 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://kerno.dev/.agent/tools/gpjk-governance-decision.schema.json",
+  "title":"GPJK Governance Decision Contract",
+  "type":"object","additionalProperties":false,
+  "required":["id","decision","version","scope"],
+  "properties":{
+    "id":{"type":"string"},"decision":{"enum":["APPROVED","REJECTED","DEFERRED"]},
+    "version":{"type":"string"},"scope":{"type":"string"},
+    "classification":{"enum":["ADDITIVE","CORRECTIVE","BREAKING","DEPRECATED","WITHDRAWN"]},
+    "evidence":{"type":"array","items":{"type":"string"}},"conformance":{"type":"array","items":{"type":"string"}}
+  }
+}
