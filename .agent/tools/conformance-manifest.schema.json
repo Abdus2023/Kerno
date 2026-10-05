@@ -1,0 +1,14 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://kerno.dev/.agent/tools/conformance-manifest.schema.json",
+  "title":"Process Conformance Manifest",
+  "type":"object",
+  "required":["id","version","rules","tests"],
+  "properties":{
+    "id":{"type":"string"},
+    "version":{"type":"string"},
+    "rules":{"type":"array","items":{"type":"object","required":["id","tests"],"properties":{"id":{"type":"string"},"tests":{"type":"array","items":{"type":"string"}}}}},
+    "tests":{"type":"array","items":{"type":"object","required":["id","expected"],"properties":{"id":{"type":"string"},"category":{"type":"string"},"expected":{}}}}
+  },
+  "additionalProperties":false
+}
