@@ -15,7 +15,8 @@
     "agent-workflow",
     "adapter-contracts",
     "repo-audit-adapter",
-    "repository-inventory"
+    "repository-inventory",
+    "evidence-bundle"
   ],
   "tools": [
     "repository-snapshot",
