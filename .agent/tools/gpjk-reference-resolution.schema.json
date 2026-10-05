@@ -1,0 +1,13 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://kerno.dev/.agent/tools/gpjk-reference-resolution.schema.json",
+  "title":"GPJK Reference Resolution Contract",
+  "type":"object","additionalProperties":false,
+  "required":["reference","status"],
+  "properties":{
+    "reference":{"type":"string","pattern":"^gpjk:[^:]+:.+$"},
+    "status":{"enum":["VALUE","NULL","MISSING","UNRESOLVED"]},
+    "value":{},
+    "trace":{"type":"array","items":{"type":"object","additionalProperties":true}}
+  }
+}
