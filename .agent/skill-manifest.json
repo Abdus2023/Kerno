@@ -13,7 +13,8 @@
     "continuation-controller",
     "repo-engineering-plan",
     "agent-workflow",
-    "adapter-contracts"
+    "adapter-contracts",
+    "repo-audit-adapter"
   ],
   "tools": [
     "repository-snapshot",
