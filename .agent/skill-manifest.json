@@ -1,7 +1,7 @@
 {
   "schema": "agent.skill-manifest/1",
   "name": "kerno-reusable-process-system",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "skills": [
     "skill-creator",
     "process-kernel",
@@ -59,7 +59,8 @@
     "gpjk-temporal-verification.schema.json",
     "gpjk-interchange.schema.json",
     "gpjk-governance-decision.schema.json",
-    "conformance-suite.schema.json"
+    "conformance-suite.schema.json",
+    "harness-manifest.json"
   ],
   "principles": [
     "NO EVIDENCE -> NO VERIFIED CLAIM",
