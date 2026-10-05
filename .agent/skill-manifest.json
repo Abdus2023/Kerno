@@ -1,7 +1,7 @@
 {
   "schema": "agent.skill-manifest/1",
   "name": "kerno-reusable-process-system",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "skills": [
     "skill-creator",
     "process-kernel",
@@ -50,7 +50,15 @@
     "release-gate",
     "execution-evidence.schema.json",
     "execution-claim.schema.json",
-    "execution-verification.schema.json"
+    "execution-verification.schema.json",
+    "evidence-ledger.schema.json",
+    "gpjk-reference-resolution.schema.json",
+    "gpjk-expression-evaluation.schema.json",
+    "gpjk-state-transition.schema.json",
+    "gpjk-authorization.schema.json",
+    "gpjk-temporal-verification.schema.json",
+    "gpjk-interchange.schema.json",
+    "gpjk-governance-decision.schema.json"
   ],
   "principles": [
     "NO EVIDENCE -> NO VERIFIED CLAIM",
