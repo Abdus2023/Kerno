@@ -1,0 +1,9 @@
+{
+  "suite":"gpjk-evidence-verification",
+  "version":"1.0.0",
+  "cases":[
+    {"id":"ev-pass","claim":"payment confirmed","evidence":[{"id":"payment","status":"OBSERVED","supports":["payment-confirmed"]}],"expected":"PASSED"},
+    {"id":"ev-missing","claim":"payment confirmed","evidence":[],"expected":"INDETERMINATE"},
+    {"id":"ev-contradiction","claim":"payment confirmed","evidence":[{"id":"yes","status":"OBSERVED","supports":["payment-confirmed"]},{"id":"no","status":"OBSERVED","supports":["payment-not-confirmed"]}],"expected":"INDETERMINATE"}
+  ]
+}
