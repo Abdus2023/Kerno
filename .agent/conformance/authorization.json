@@ -1,0 +1,9 @@
+{
+  "suite":"gpjk-authorization",
+  "version":"1.0.0",
+  "cases":[
+    {"id":"a-permit","policy":{"limit":10000},"request":{"amount":4200},"expected":"permit"},
+    {"id":"a-deny","policy":{"limit":10000},"request":{"amount":12000},"expected":"deny"},
+    {"id":"a-unknown-default-deny","policy":{},"request":{"amount":4200},"expected":"deny"}
+  ]
+}
