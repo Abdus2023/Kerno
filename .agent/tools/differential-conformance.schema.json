@@ -1,0 +1,23 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://kerno.dev/.agent/tools/differential-conformance.schema.json",
+  "title":"GPJK Differential Conformance Result",
+  "type":"object","additionalProperties":false,
+  "required":["gpjk","fixture_suite","reference","candidate","cases","summary"],
+  "properties":{
+    "gpjk":{"type":"string","minLength":1},
+    "fixture_suite":{"type":"string","minLength":1},
+    "reference":{"type":"object","required":["id","version"],"properties":{"id":{"type":"string"},"version":{"type":"string"}},"additionalProperties":false},
+    "candidate":{"type":"object","required":["id","version"],"properties":{"id":{"type":"string"},"version":{"type":"string"}},"additionalProperties":false},
+    "cases":{"type":"array","items":{"type":"object","required":["case_id","status"],"properties":{
+      "case_id":{"type":"string"},"status":{"enum":["MATCH","MISMATCH","ERROR","NOT_RUN"]},
+      "reference":{"type":["string","number","boolean","object","null"]},
+      "candidate":{"type":["string","number","boolean","object","null"]},
+      "diagnostic":{"type":"string"}
+    },"additionalProperties":false}},
+    "summary":{"type":"object","required":["match","mismatch","error","not_run"],"properties":{
+      "match":{"type":"integer","minimum":0},"mismatch":{"type":"integer","minimum":0},
+      "error":{"type":"integer","minimum":0},"not_run":{"type":"integer","minimum":0}
+    },"additionalProperties":false}
+  }
+}
