@@ -1,7 +1,7 @@
 {
   "schema": "agent.skill-manifest/1",
   "name": "kerno-reusable-process-system",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "skills": [
     "skill-creator",
     "process-kernel",
@@ -25,7 +25,15 @@
     "evidence-bundle",
     "github-acquisition",
     "execution-evidence",
-    "execution-verification"
+    "execution-verification",
+    "evidence-ledger",
+    "gpjk-reference-resolution",
+    "gpjk-expression-evaluation",
+    "gpjk-state-machine",
+    "gpjk-authorization",
+    "gpjk-temporal-verification",
+    "gpjk-interchange",
+    "gpjk-governance"
   ],
   "tools": [
     "process-model.schema.json",
